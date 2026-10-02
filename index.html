@@ -728,6 +728,10 @@ async function entrySheet(id){
       <div class="btns"><button class="danger" id="e_del">Delete</button><button id="e_fav">Favorite</button>${e.date !== todayStr() ? '<button id="e_copy">Log today</button>' : ''}<button class="primary" id="e_save">Save</button></div>`;
     sheet(h);
     const read = () => { const v = readMacros('e_'), k = amtOf('e_scale') || 1; return {...v, cal:v.cal*k, p:v.p*k, c:v.c*k, f:v.f*k}; };
+    // Changing the time moves the item to the meal for that time; you can still pick a different meal after.
+    const syncMeal = () => { const t = readTime('e_time'); if (t) $('#e_meal').value = mealForTime(t); };
+    $('#e_time').addEventListener('change', syncMeal); $('#e_time').addEventListener('input', syncMeal);
+    if ($('#e_time_ap')) $('#e_time_ap').addEventListener('change', syncMeal);
     $('#e_save').onclick = async () => {
       const v = read(); if (!v.name) return toast('Add a name first');
       const oldDate = e.date; if (!applyWhen(e)) return;
@@ -758,6 +762,7 @@ function applyWhen(e){
   const d = $('#e_date').value, r = readTime('e_time'), t = r === '' ? entTime(e) : r;
   if (!t) { toast(timeHint()); return false; }
   if (!validDate(d)) { toast('Pick today or an earlier date'); return false; }
+  if (t !== entTime(e) && !$('#e_meal')) e.meal = mealForTime(t); // queued items: the meal follows the new time
   e.date = d; e.time = t; e.ts = tsOf(d, t); return true;
 }
 async function saveMealSheet(m){

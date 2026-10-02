@@ -1,5 +1,5 @@
 // Bump this when you change any app file so phones pick up the update.
-const CACHE = 'chowlog-v18';
+const CACHE = 'chowlog-v19';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
 self.addEventListener('install', e => {

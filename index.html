@@ -336,7 +336,7 @@ const saveSettings = () => idb.put('kv', {k:'settings', v:S});
 const MEALS = ['breakfast','snack_am','lunch','snack_pm','dinner','snack_eve'];
 const MEAL_LABEL = {breakfast:'Breakfast', snack_am:'Morning snack', lunch:'Lunch', snack_pm:'Afternoon snack', dinner:'Dinner', snack_eve:'Evening snack'};
 const SNACKS = new Set(['snack_am','snack_pm','snack_eve']);
-const ICON = {manual:'✎', barcode:'▦', ai:'◉', fav:'★', label:'▥', text:'Aa', search:'⌕'};
+const ICON = {manual:'✎', barcode:'▦', ai:'◉', fav:'★', label:'▥', text:'Aa', search:'⌕', recipe:'♨'};
 // Breakfast 04:00–08:59 · Morning snack 09:00–10:29 · Lunch 10:30–13:29 · Afternoon snack 13:30–16:59 · Dinner 17:00–20:59 · Evening snack 21:00–03:59
 function mealForTime(t){
   const [H, M] = String(t).split(':').map(Number), m = H*60 + (M || 0);
@@ -492,7 +492,7 @@ async function renderAdd(){
     <button class="act" data-act="label"><span>▥</span>Label<small>Read Nutrition Facts</small></button>
     <button class="act" data-act="manual"><span>✎</span>Manual<small>Enter values</small></button>
   </div>
-  <h3 class="hrow">Favorites and saved meals <button class="mini" data-act="newmeal">+ Create meal</button></h3>`;
+  <h3 class="hrow">Favorites, meals and recipes <span><button class="mini" data-act="newmeal">+ Meal</button> <button class="mini" data-act="newrecipe">+ Recipe</button></span></h3>`;
   h += (favs.length ? `<p class="hint" style="margin:-4px 4px 8px">Long-press any item to edit it. Swipe left to delete.</p>` : '') + favList(favs, true) + recentList();
   $('#tab-add').innerHTML = h;
   $('#lw_date').onchange = ev => { const v = ev.target.value;
@@ -503,10 +503,10 @@ async function renderAdd(){
 }
 function favList(favs, editable){
   return favs.length ? favs.map(f => `<div class="swipe" data-swipe="fav" data-id="${f.id}"><div class="swipe-bg">Delete</div>
-      <div class="row" data-act="usefav" data-id="${f.id}" role="button" tabindex="0">${(f.thumb || f.items?.find(i => i.thumb)?.thumb) ? `<img src="${f.thumb || f.items.find(i => i.thumb).thumb}" alt="">` : `<div class="ic">${f.items ? '▣' : '★'}</div>`}
-      <div class="rm"><div class="rn">${esc(f.name)}</div><div class="rd">${f.items ? f.items.length + ' items · ' : ''}P ${r0(f.p)} · C ${r0(f.c)} · F ${r0(f.f)}</div></div>
+      <div class="row" data-act="usefav" data-id="${f.id}" role="button" tabindex="0">${(f.thumb || f.items?.find(i => i.thumb)?.thumb) ? `<img src="${f.thumb || f.items.find(i => i.thumb).thumb}" alt="">` : `<div class="ic">${f.recipe ? '♨' : f.items ? '▣' : '★'}</div>`}
+      <div class="rm"><div class="rn">${esc(f.name)}</div><div class="rd">${f.recipe ? `Recipe · per serving (makes ${fmtAmt(f.servings)}) · ` : f.items ? f.items.length + ' items · ' : ''}P ${r0(f.p)} · C ${r0(f.c)} · F ${r0(f.f)}</div></div>
       <div class="rc">${r0(f.cal)}</div>${editable && f.items ? `<button class="x" data-act="editmeal" data-id="${f.id}" aria-label="Edit meal">✎</button>` : ''}</div></div>`).join('')
-    : `<div class="empty">Tap “+ Create meal” to build one, or open any logged entry and tap “Favorite.”</div>`;
+    : `<div class="empty">Tap “+ Meal” or “+ Recipe” to build one, or open any logged entry and tap “Favorite.”</div>`;
 }
 function recentList(){
   return `<h3>Recent</h3>` + (recentCache.length ? recentCache.map((e,i) => `<button class="row" data-act="userecent" data-i="${i}">${e.thumb ? `<img src="${e.thumb}" alt="">` : `<div class="ic">${ICON[e.source]||'•'}</div>`}
@@ -516,19 +516,20 @@ function recentList(){
 
 /* ---------- Meal builder ---------- */
 let builder = null; // {id?, name, items:[{name,cal,p,c,f}]} while creating/editing a saved meal
-const addLabel = () => builder ? 'Add to meal' : `Add to ${MEAL_LABEL[curMeal]}`;
+const addLabel = () => builder ? (builder.recipe ? 'Add to recipe' : 'Add to meal') : `Add to ${MEAL_LABEL[curMeal]}`;
 async function renderBuilder(){
   const favs = (await idb.all('favorites')).sort((a,b) => (b.used||0) - (a.used||0));
   recentCache = await recentItems();
-  const t = totals(builder.items);
-  let h = `<div class="card"><h2>${builder.id ? 'Edit meal' : 'Create a meal'}</h2>
-    <label>Meal name<input id="b_name" value="${esc(builder.name)}" placeholder="Chicken burrito bowl"></label>
-    <div class="tot">${r0(t.cal).toLocaleString()} cal · P ${r0(t.p)} · C ${r0(t.c)} · F ${r0(t.f)}</div></div>
-  <h3>Items in this meal (${builder.items.length})</h3>`;
+  const t = totals(builder.items), rec = builder.recipe, word = rec ? 'recipe' : 'meal';
+  let h = `<div class="card"><h2>${builder.id ? 'Edit ' + word : 'Create a ' + word}</h2>
+    <label>${rec ? 'Recipe' : 'Meal'} name<input id="b_name" value="${esc(builder.name)}" placeholder="${rec ? 'Turkey chili' : 'Chicken burrito bowl'}"></label>
+    ${rec ? `${amtInput('b_srv', 'Makes how many servings?', fmtAmt(builder.servings || 4))}${fracChips('b_srv')}<div id="b_per" class="tot"></div>
+      <p class="hint" id="b_whole"></p>` : `<div class="tot">${r0(t.cal).toLocaleString()} cal · P ${r0(t.p)} · C ${r0(t.c)} · F ${r0(t.f)}</div>`}</div>
+  <h3>${rec ? 'Ingredients' : 'Items in this meal'} (${builder.items.length})</h3>`;
   h += builder.items.length ? builder.items.map((i,k) => `<div class="swipe" data-swipe="bitem" data-i="${k}"><div class="swipe-bg">Remove</div>
       <button class="row" data-act="bitem" data-i="${k}">${i.thumb ? `<img src="${i.thumb}" alt="">` : '<div class="ic">•</div>'}<div class="rm"><div class="rn">${esc(i.name)}</div>
       <div class="rd">P ${r0(i.p)} · C ${r0(i.c)} · F ${r0(i.f)}</div></div><div class="rc">${r0(i.cal)}</div></button></div>`).join('')
-    : `<div class="empty">Add items with the buttons below. Swipe an item left to remove it, or tap it to adjust.</div>`;
+    : `<div class="empty">Add ${rec ? 'ingredients' : 'items'} with the buttons below. Swipe one left to remove it, or tap it to adjust.</div>`;
   h += `<div class="btns sticky"><button id="b_cancel">Cancel</button><button id="b_save">Save meal</button><button class="primary" id="b_log">Save and log</button></div>
   <h3>Add an item</h3><div class="actions">
     <button class="act" data-act="photo"><span>◉</span>Photo</button>
@@ -541,17 +542,26 @@ async function renderBuilder(){
   <h3>Favorites and saved meals</h3>` + favList(favs, false) + recentList();
   $('#tab-add').innerHTML = h;
   $('#b_name').oninput = ev => { builder.name = ev.target.value; };
+  if (rec) {
+    const upd = () => { const n = amtOf('b_srv'); if (n > 0) builder.servings = n;
+      $('#b_per').textContent = n > 0 ? `Per serving: ${r0(t.cal/n).toLocaleString()} cal · P ${r0(t.p/n)} · C ${r0(t.c/n)} · F ${r0(t.f/n)}` : 'Enter the number of servings';
+      $('#b_whole').textContent = `Whole recipe: ${r0(t.cal).toLocaleString()} cal · P ${r0(t.p)} · C ${r0(t.c)} · F ${r0(t.f)}`; };
+    $('#b_srv').oninput = upd; upd();
+  }
   $('#b_cancel').onclick = () => { if (builder.items.length && !confirm('Discard this meal?')) return; builder = null; refresh(); };
   $('#b_save').onclick = () => saveBuilder(false);
   $('#b_log').onclick = () => saveBuilder(true);
 }
 async function saveBuilder(log){
   if (!builder.items.length) return toast('Add at least one item');
-  const t = totals(builder.items);
-  const f = {id:builder.id || uid(), name:builder.name.trim() || 'Custom meal', cal:r1(t.cal), p:r1(t.p), c:r1(t.c), f:r1(t.f),
-    items:builder.items.map(i => ({name:i.name, cal:r1(i.cal), p:r1(i.p), c:r1(i.c), f:r1(i.f), thumb:i.thumb})), used:Date.now()};
+  const t = totals(builder.items), rec = builder.recipe, n = rec ? amtOf('b_srv') : 1;
+  if (rec && !(n > 0)) return toast('Enter how many servings the recipe makes');
+  const f = {id:builder.id || uid(), name:builder.name.trim() || (rec ? 'Recipe' : 'Custom meal'),
+    cal:r1(t.cal/n), p:r1(t.p/n), c:r1(t.c/n), f:r1(t.f/n), // recipes store values per serving
+    items:builder.items.map(i => ({name:i.name, cal:r1(i.cal), p:r1(i.p), c:r1(i.c), f:r1(i.f), thumb:i.thumb})), used:Date.now(),
+    ...(rec ? {recipe:true, servings:n} : {})};
   await idb.put('favorites', f); builder = null;
-  if (log) await useFav(f.id); else { toast('Meal saved'); refresh(); }
+  if (log) { refresh(); await useFav(f.id); } else { toast(rec ? 'Recipe saved' : 'Meal saved'); refresh(); }
 }
 function bItemSheet(k){
   const i = builder.items[k]; if (!i) return;
@@ -575,14 +585,14 @@ async function addToBuilder(o){
       return toast(transient(err) ? 'No connection. Use a favorite, a recent food, or manual entry.' : err.message);
     }
     await idb.del('entries', e.id);
-    if (e.items?.length > 1) { e.items.forEach(i => builder.items.push({name:i.name, cal:r1(i.cal), p:r1(i.p), c:r1(i.c), f:r1(i.f)})); toast(`Added ${e.items.length} items to meal`); if (curTab === 'add') renderAdd(); return; }
+    if (e.items?.length > 1) { e.items.forEach(i => builder.items.push({name:i.name, cal:r1(i.cal), p:r1(i.p), c:r1(i.c), f:r1(i.f)})); toast(`Added ${e.items.length} items to ${builder.recipe ? 'recipe' : 'meal'}`); if (curTab === 'add') renderAdd(); return; }
     o = e;
   }
   builder.items.push({name:o.name, cal:r1(o.cal), p:r1(o.p), c:r1(o.c), f:r1(o.f), thumb:o.thumb});
-  toast('Added to meal'); if (curTab === 'add') renderAdd();
+  toast(builder.recipe ? 'Added to recipe' : 'Added to meal'); if (curTab === 'add') renderAdd();
 }
 
-const addedMsg = () => builder ? 'Added to meal' : `Added to ${MEAL_LABEL[curMeal]}${logDate ? ' on ' + shortD(logDate) : ''}`;
+const addedMsg = () => builder ? (builder.recipe ? 'Added to recipe' : 'Added to meal') : `Added to ${MEAL_LABEL[curMeal]}${logDate ? ' on ' + shortD(logDate) : ''}`;
 async function addEntry(o){
   if (builder) return addToBuilder(o);
   const e = {id:uid(), date:logDate || todayStr(), meal:curMeal, status:'ok', source:'manual', ...o};
@@ -592,12 +602,30 @@ async function addEntry(o){
 }
 async function useFav(id){
   const f = await idb.get('favorites', id); if (!f) return;
+  if (f.recipe) return recipeSheet(f);
   if (f.items && builder) for (const i of f.items) await addEntry({name:i.name, cal:i.cal, p:i.p, c:i.c, f:i.f, source:'fav', thumb:i.thumb}); // building a meal: keep its parts
   else if (f.items) await addEntry({name:f.name, cal:f.cal, p:f.p, c:f.c, f:f.f, source:'fav', thumb:f.thumb || f.items.find(i => i.thumb)?.thumb,
     items:f.items.map(i => ({name:i.name, cal:i.cal, p:i.p, c:i.c, f:i.f}))}); // log a saved meal as one line
   else await addEntry({name:f.name, cal:f.cal, p:f.p, c:f.c, f:f.f, source:'fav', thumb:f.thumb});
   f.used = Date.now(); await idb.put('favorites', f);
   toast(addedMsg());
+}
+function recipeSheet(f){
+  const per = f, n = f.servings || 1, thumb = f.thumb || f.items?.find(i => i.thumb)?.thumb;
+  sheet(`${thumb ? `<img class="pimg" src="${thumb}" alt="">` : ''}<h2>${esc(f.name)}</h2>
+    <p class="hint">Recipe makes ${fmtAmt(n)} servings. One serving: ${r0(per.cal)} cal, P ${r1(per.p)}, C ${r1(per.c)}, F ${r1(per.f)}</p>
+    <div style="clear:both">${amtInput('r_n', 'Servings you ate')}</div>${fracChips('r_n')}<div id="r_tot" class="tot"></div>
+    <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="r_go">${addLabel()}</button></div>`);
+  const upd = () => { const a = amtOf('r_n'); $('#r_tot').textContent = a > 0 ? `${r0(per.cal*a)} cal · P ${r0(per.p*a)} · C ${r0(per.c*a)} · F ${r0(per.f*a)}` : 'Enter an amount like 1.5 or 1 1/2'; };
+  $('#r_n').oninput = upd; upd();
+  $('#r_go').onclick = async () => {
+    const a = amtOf('r_n'); if (!(a > 0)) return toast('Enter an amount like 1.5 or 1 1/2');
+    const k = a / n; // share of the whole recipe
+    await addEntry({name:`${f.name} (${amtText(a, 'serving')})`, cal:per.cal*a, p:per.p*a, c:per.c*a, f:per.f*a, source:'recipe', thumb,
+      items:(f.items || []).map(i => ({name:i.name, cal:r1(i.cal*k), p:r1(i.p*k), c:r1(i.c*k), f:r1(i.f*k)}))});
+    f.used = Date.now(); await idb.put('favorites', f);
+    closeSheet(); toast(addedMsg());
+  };
 }
 async function useRecent(i){
   const e = recentCache[i]; if (!e) return;
@@ -1203,7 +1231,7 @@ function longPress(row){
 }
 async function favSheet(id){
   const f = await idb.get('favorites', id); if (!f) return;
-  if (f.items) { builder = {id:f.id, name:f.name, items:f.items.map(i => ({...i}))}; showTab('add'); return; } // saved meals open in the meal editor
+  if (f.items) { builder = {id:f.id, name:f.name, items:f.items.map(i => ({...i})), recipe:!!f.recipe, servings:f.servings}; showTab('add'); return; } // saved meals open in the meal editor
   sheet(`${f.thumb ? `<img class="pimg" src="${f.thumb}" alt="">` : ''}<h2>Edit favorite</h2>
     <label style="clear:both">Name<input id="fv_name" value="${esc(f.name)}"></label>
     <div class="grid4">${numF('fv_cal','Calories',r1(f.cal))}${numF('fv_p','Protein (g)',r1(f.p))}${numF('fv_c','Carbs (g)',r1(f.c))}${numF('fv_f','Fat (g)',r1(f.f))}</div>
@@ -1274,7 +1302,8 @@ document.addEventListener('click', ev => {
     case 'pickprod': { const pr = searchCache[d.src]?.[+d.i]; if (pr) { if (d.src === 'remote') idb.put('products', pr); servingSheet(pr, 'search'); } break; }
     case 'frac': { const inp = $('#' + el.parentNode.dataset.for); if (inp) { inp.value = d.v; inp.dispatchEvent(new Event('input')); } break; }
     case 'newmeal': builder = {name:'', items:[]}; renderAdd(); window.scrollTo(0,0); break;
-    case 'editmeal': idb.get('favorites', d.id).then(f => { if (!f) return; builder = {id:f.id, name:f.name, items:f.items.map(i => ({...i}))}; renderAdd(); window.scrollTo(0,0); }); break;
+    case 'newrecipe': builder = {name:'', items:[], recipe:true, servings:4}; renderAdd(); window.scrollTo(0,0); break;
+    case 'editmeal': idb.get('favorites', d.id).then(f => { if (!f) return; builder = {id:f.id, name:f.name, items:f.items.map(i => ({...i})), recipe:!!f.recipe, servings:f.servings}; renderAdd(); window.scrollTo(0,0); }); break;
     case 'bitem': bItemSheet(+d.i); break;
     case 'usefav': useFav(d.id); break;
     case 'delfav': delFav(d.id); break;

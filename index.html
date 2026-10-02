@@ -97,6 +97,7 @@ h3{font-size:15px;color:var(--mute);font-weight:600;margin:22px 4px 8px}
 .act span{font-size:26px;line-height:1.2}
 .act small{font-weight:400;color:var(--mute);font-size:12px}
 .act.primary-act{background:var(--field);color:var(--headink);border-color:var(--field)}
+.pick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:4px 0 8px}
 .act.primary-act small{color:var(--headink);opacity:.7}
 
 .chart{width:100%;height:auto;display:block}
@@ -173,6 +174,7 @@ label.chk input{width:auto;margin:0}
 <div id="modal" class="modal hidden"><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
 <div id="toast" role="status"></div>
 <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
+<input type="file" id="galleryInput" accept="image/*" hidden>
 <input type="file" id="importInput" accept="application/json,.json" hidden>
 
 <script>
@@ -491,7 +493,41 @@ function toJpeg(img, max, q){
   c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', q);
 }
 let photoMode = {type:'meal'};
-function scanLabelFor(code){ closeSheet(); photoMode = {type:'label', code}; $('#photoInput').click(); }
+function scanLabelFor(code){ choosePhoto({type:'label', code}); }
+function choosePhoto(mode){
+  sheet(`<h2>${mode.type === 'label' ? 'Nutrition label' : 'Meal photo'}</h2>
+    <div class="pick"><button class="act primary-act" id="pk_cam"><span>◉</span>Take a photo</button>
+    <button class="act" id="pk_gal"><span>▣</span>Choose from gallery</button></div>
+    <div class="btns"><button data-act="close">Cancel</button></div>`);
+  $('#pk_cam').onclick = () => { closeSheet(); photoMode = {...mode, gallery:false}; $('#photoInput').click(); };
+  $('#pk_gal').onclick = () => { closeSheet(); photoMode = {...mode, gallery:true}; $('#galleryInput').click(); };
+}
+// Reads when a photo was taken from its EXIF data (used for gallery picks).
+async function exifDate(file){
+  try {
+    const v = new DataView(await file.slice(0, 256*1024).arrayBuffer());
+    if (v.getUint16(0) !== 0xFFD8) return null;
+    let o = 2;
+    while (o + 10 < v.byteLength){
+      const marker = v.getUint16(o), len = v.getUint16(o + 2);
+      if (marker === 0xFFE1 && v.getUint32(o + 4) === 0x45786966){
+        const t = o + 10, le = v.getUint16(t) === 0x4949;
+        const u16 = p => v.getUint16(t + p, le), u32 = p => v.getUint32(t + p, le);
+        const ifd = off => { const n = u16(off), tags = {}; for (let i = 0; i < n; i++){ const e = off + 2 + i*12; tags[u16(e)] = {count:u32(e + 4), val:u32(e + 8)}; } return tags; };
+        const str = tg => { if (!tg) return null; let s = ''; for (let i = 0; i < tg.count - 1; i++) s += String.fromCharCode(v.getUint8(t + tg.val + i)); return s; };
+        const i0 = ifd(u32(4)); let s = null;
+        if (i0[0x8769]) { const ex = ifd(i0[0x8769].val); s = str(ex[0x9003]) || str(ex[0x9004]); }
+        s = s || str(i0[0x0132]);
+        const m = s && s.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2})/);
+        return m ? {date:`${m[1]}-${m[2]}-${m[3]}`, time:`${m[4]}:${m[5]}`} : null;
+      }
+      if ((marker & 0xFF00) !== 0xFF00) break;
+      o += 2 + len;
+    }
+  } catch {}
+  return null;
+}
+$('#galleryInput').onchange = ev => $('#photoInput').onchange(ev);
 $('#photoInput').onchange = async ev => {
   const file = ev.target.files[0]; ev.target.value = ''; if (!file) return;
   const mode = photoMode; photoMode = {type:'meal'};
@@ -501,14 +537,24 @@ $('#photoInput').onchange = async ev => {
   catch { return toast('That photo could not be read. Try again.'); }
   if (mode.type === 'label') return labelSheet(full, thumb, mode.code);
   const now = navigator.onLine && S.apiKey;
+  // For a gallery photo, offer the time it was taken (unless a date/time was already chosen).
+  let taken = null;
+  if (mode.gallery && !logDate && !logTime){
+    const x = await exifDate(file);
+    if (x && validDate(x.date) && Math.abs(tsOf(x.date, x.time) - Date.now()) > 30*60000) taken = x;
+  }
+  const meal = () => taken && ($('#p_when') ? $('#p_when').checked : true) ? mealForHour(+taken.time.split(':')[0]) : curMeal;
   sheet(`<h2>Log a photo</h2><img class="prev" src="${thumb}" alt="">
+    ${taken ? `<label class="chk"><input type="checkbox" id="p_when" checked> Log it when the photo was taken: ${taken.date === todayStr() ? 'today' : shortD(taken.date)}, ${fmtTime(taken.time)}</label>` : ''}
     <label>Note (optional, improves accuracy)<textarea id="p_note" placeholder="About 2 cups of rice, cooked in butter"></textarea></label>
     <p class="hint">${now ? 'It will be analyzed right away.' : 'It will be queued and analyzed automatically when you are back online' + (S.apiKey ? '.' : ', once your API key is added in Settings.')}</p>
-    <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="p_go">Add to ${MEAL_LABEL[curMeal]}</button></div>`);
+    <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="p_go">Add to ${MEAL_LABEL[meal()]}</button></div>`);
+  if (taken) $('#p_when').onchange = () => { $('#p_go').textContent = `Add to ${MEAL_LABEL[meal()]}`; };
   $('#p_go').onclick = async () => {
-    const id = uid();
+    const id = uid(), useTaken = taken && $('#p_when').checked;
     await idb.put('photos', {id, data:full});
-    await addEntry({id, name:'Photo meal', cal:0, p:0, c:0, f:0, source:'ai', thumb, status:'pending', pending:{type:'photo', note:$('#p_note').value.trim()}});
+    await addEntry({id, name:'Photo meal', cal:0, p:0, c:0, f:0, source:'ai', thumb, status:'pending', pending:{type:'photo', note:$('#p_note').value.trim()},
+      meal:meal(), ...(useTaken ? {date:taken.date, time:taken.time} : {})});
     closeSheet(); toast(now ? 'Analyzing…' : 'Queued for analysis'); processQueue();
   };
 };
@@ -817,8 +863,8 @@ document.addEventListener('click', ev => {
     case 'entry': entrySheet(d.id); break;
     case 'addto': curMeal = d.meal; if (curDate !== todayStr()) logDate = curDate; showTab('add'); break;
     case 'meal': curMeal = d.meal; renderAdd(); break;
-    case 'photo': photoMode = {type:'meal'}; $('#photoInput').click(); break;
-    case 'label': photoMode = {type:'label'}; $('#photoInput').click(); break;
+    case 'photo': choosePhoto({type:'meal'}); break;
+    case 'label': choosePhoto({type:'label'}); break;
     case 'scan': scanSheet(); break;
     case 'manual': manualSheet(); break;
     case 'usefav': useFav(d.id); break;

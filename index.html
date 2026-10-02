@@ -97,7 +97,10 @@ h3{font-size:15px;color:var(--mute);font-weight:600;margin:22px 4px 8px}
 .swipe{position:relative;overflow:hidden;touch-action:pan-y}
 .swipe-bg{position:absolute;inset:0;background:var(--signal);color:#fff;display:flex;align-items:center;justify-content:flex-end;padding-right:20px;font-weight:700;opacity:.7}
 .swipe.arm .swipe-bg{opacity:1}
-.swipe > .row{position:relative;background:var(--card);user-select:none;-webkit-user-select:none}
+.swipe > .row{position:relative;background:var(--card)}
+.row{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.row img{pointer-events:none}
+.row.pressing{background:var(--chip);transition:background .3s}
 h3.hrow{display:flex;align-items:center;justify-content:space-between}
 .btns.sticky{position:sticky;bottom:calc(env(safe-area-inset-bottom,0px) + 70px);background:var(--paper);padding:8px 0}
 .row img,.row .ic{width:42px;height:42px;border-radius:var(--r-sm);object-fit:cover;flex:none}
@@ -123,6 +126,12 @@ h3.hrow{display:flex;align-items:center;justify-content:space-between}
 .act.primary-act{background:var(--field);color:var(--headink);border-color:var(--field)}
 .act.wide{grid-column:1 / -1;flex-direction:row;justify-content:center;gap:10px;padding:12px}
 .act.wide span{font-size:20px}
+.fr{display:flex;gap:6px;flex-wrap:wrap;margin:-4px 0 12px}
+.fr button{border:1px solid var(--line);background:var(--card);border-radius:16px;padding:5px 11px;font-size:14px;min-width:38px}
+.pimg{width:88px;height:88px;object-fit:contain;border-radius:8px;background:#fff;border:1px solid var(--line);float:right;margin:0 0 8px 10px}
+.row img{background:#fff}
+.srow{display:flex;gap:8px;margin-bottom:6px}.srow input{flex:1;margin:0}
+.srow button{padding:0 16px;border-radius:var(--r-sm);border:0;background:var(--field);color:var(--headink);font-weight:600}
 .pick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:4px 0 8px}
 .act.primary-act small{color:var(--headink);opacity:.7}
 
@@ -225,6 +234,56 @@ const byTime = (a,b) => (tsOf(a.date, entTime(a)) - tsOf(b.date, entTime(b))) ||
 const validDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s) && s <= todayStr();
 function totals(list){ return list.reduce((t,e) => ({cal:t.cal+num(e.cal), p:t.p+num(e.p), c:t.c+num(e.c), f:t.f+num(e.f)}), {cal:0,p:0,c:0,f:0}); }
 
+/* amounts: fractions, units */
+const FRAC = {'¼':'1/4','½':'1/2','¾':'3/4','⅓':'1/3','⅔':'2/3','⅛':'1/8'};
+function parseAmt(s){
+  s = String(s ?? '').trim().replace(/[¼½¾⅓⅔⅛]/g, m => ' ' + FRAC[m]).trim();
+  const m = s.match(/^(\d+(?:\.\d+)?)?\s*(?:(\d+)\s*\/\s*(\d+))?$/);
+  if (!m || (!m[1] && !m[2])) return NaN;
+  let v = m[1] ? parseFloat(m[1]) : 0;
+  if (m[2]) { if (+m[3] === 0) return NaN; v += +m[2] / +m[3]; }
+  return v;
+}
+function fmtAmt(v){
+  const w = Math.floor(v + 1e-9), fr = v - w;
+  const g = [[0,''],[1/8,'⅛'],[1/4,'¼'],[1/3,'⅓'],[1/2,'½'],[2/3,'⅔'],[3/4,'¾'],[1,'']].find(([x]) => Math.abs(fr - x) < 0.01);
+  if (g) return g[0] === 1 ? String(w + 1) : (w ? w : '') + g[1] || '0';
+  return String(Math.round(v * 100) / 100);
+}
+const amtInput = (id, label, val = '1') => `<label>${label}<input id="${id}" inputmode="decimal" autocomplete="off" value="${val}"></label>`;
+const fracChips = id => `<div class="fr" data-for="${id}">${['¼','⅓','½','⅔','¾','1','1½','2'].map(x => `<button type="button" data-act="frac" data-v="${x}">${x}</button>`).join('')}</div>`;
+const amtOf = id => { const v = parseAmt($('#' + id).value); return v > 0 ? v : NaN; };
+const UNITS = {serving:{l:'servings'}, g:{l:'g', f:1}, oz:{l:'oz', f:28.3495}, lb:{l:'lb', f:453.592}, ml:{l:'ml', f:1}, floz:{l:'fl oz', f:29.5735}};
+function unitsFor(p){ return !p.size ? ['serving'] : p.basis === 'ml' ? ['serving','ml','floz'] : ['serving','g','oz','lb']; }
+function amtText(a, u){ return u === 'serving' ? `${fmtAmt(a)} serving${a === 1 ? '' : 's'}` : `${fmtAmt(a)} ${UNITS[u].l}`; }
+function normalizeProduct(p){
+  if (!p.size) { const m = String(p.serving?.label || '').match(/(\d+(?:\.\d+)?)\s*(g|ml)\b/i); if (m) { p.size = +m[1]; p.basis = m[2].toLowerCase(); } }
+  if (p.size && !p.basis) p.basis = 'g';
+  return p;
+}
+async function cacheThumb(url){
+  try {
+    const r = await fetch(url); if (!r.ok) return null;
+    const bmp = await createImageBitmap(await r.blob()), s = Math.min(1, 160 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bmp.width*s); c.height = Math.round(bmp.height*s);
+    const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(bmp, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.78);
+  } catch { return null; }
+}
+async function productThumb(p){ // stores a small copy so the photo shows offline
+  if (p.thumb || !p.image) return p.thumb || null;
+  const t = await cacheThumb(p.image); if (t) { p.thumb = t; await idb.put('products', p); } return t;
+}
+async function wikiThumb(term){
+  try {
+    if (!term) return null;
+    const r = await fetch('https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&prop=pageimages&piprop=thumbnail&pithumbsize=240&generator=search&gsrlimit=1&gsrsearch=' + encodeURIComponent(term));
+    if (!r.ok) return null;
+    const pg = Object.values((await r.json()).query?.pages || {})[0], src = pg?.thumbnail?.source;
+    return src ? (await cacheThumb(src)) || src : null;
+  } catch { return null; }
+}
+
 class NetErr extends Error {}
 class HttpErr extends Error { constructor(status, msg){ super(msg); this.status = status; } }
 const transient = e => e instanceof NetErr || (e instanceof HttpErr && (e.status === 429 || e.status >= 500));
@@ -274,11 +333,16 @@ let S = {...DEFAULTS};
 async function loadSettings(){ const r = await idb.get('kv','settings'); S = {...DEFAULTS, ...(r ? r.v : {})}; }
 const saveSettings = () => idb.put('kv', {k:'settings', v:S});
 
-const MEALS = ['breakfast','lunch','dinner','snack'];
-const MEAL_LABEL = {breakfast:'Breakfast', lunch:'Lunch', dinner:'Dinner', snack:'Snacks'};
-const ICON = {manual:'✎', barcode:'▦', ai:'◉', fav:'★', label:'▥', text:'Aa'};
-function mealForHour(h){ return h < 10 ? 'breakfast' : h < 14 ? 'lunch' : h < 17 ? 'snack' : h < 21 ? 'dinner' : 'snack'; }
-function defaultMeal(){ const h = new Date().getHours(); return h < 10 ? 'breakfast' : h < 14 ? 'lunch' : h < 17 ? 'snack' : h < 21 ? 'dinner' : 'snack'; }
+const MEALS = ['breakfast','snack_am','lunch','snack_pm','dinner','snack_eve'];
+const MEAL_LABEL = {breakfast:'Breakfast', snack_am:'Morning snack', lunch:'Lunch', snack_pm:'Afternoon snack', dinner:'Dinner', snack_eve:'Evening snack'};
+const SNACKS = new Set(['snack_am','snack_pm','snack_eve']);
+const ICON = {manual:'✎', barcode:'▦', ai:'◉', fav:'★', label:'▥', text:'Aa', search:'⌕'};
+// Breakfast 04:00–08:59 · Morning snack 09:00–10:29 · Lunch 10:30–13:29 · Afternoon snack 13:30–16:59 · Dinner 17:00–20:59 · Evening snack 21:00–03:59
+function mealForTime(t){
+  const [H, M] = String(t).split(':').map(Number), m = H*60 + (M || 0);
+  return m < 240 ? 'snack_eve' : m < 540 ? 'breakfast' : m < 630 ? 'snack_am' : m < 810 ? 'lunch' : m < 1020 ? 'snack_pm' : m < 1260 ? 'dinner' : 'snack_eve';
+}
+function defaultMeal(){ return mealForTime(hhmm(new Date())); }
 let curDate = todayStr(), lastToday = curDate, curTab = 'today', curMeal = defaultMeal(), trendDays = 7, recentCache = [];
 let calOpen = false, calMonth = null; // calendar: week strip by default, month when expanded
 let logTime = null, logDate = null; // null = use the current date/time at the moment you log
@@ -396,6 +460,7 @@ async function renderToday(){
   </div>`;
   for (const m of MEALS){
     const list = es.filter(e => e.meal === m), mt = totals(list.filter(e => e.status === 'ok'));
+    if (SNACKS.has(m) && !list.length) continue; // snack sections appear only once something is logged in them
     h += `<div class="card meal"><div class="mh"><b>${MEAL_LABEL[m]}</b><span>${r0(mt.cal)} cal</span><button class="mini" data-act="addto" data-meal="${m}">Add</button></div>`;
     h += list.length ? list.map(entryRow).join('') : `<div class="empty">Nothing logged yet.</div>`;
     if (list.filter(e => e.status === 'ok').length > 1) h += `<button class="link" data-act="savemeal" data-meal="${m}">Save as a meal</button>`;
@@ -423,21 +488,22 @@ async function renderAdd(){
     <button class="act primary-act" data-act="photo"><span>◉</span>Photo<small>AI estimate</small></button>
     <button class="act primary-act" data-act="describe"><span>Aa</span>Describe<small>Type what you ate</small></button>
     <button class="act" data-act="scan"><span>▦</span>Barcode<small>Scan or type</small></button>
+    <button class="act" data-act="search"><span>⌕</span>Search<small>Food database</small></button>
     <button class="act" data-act="label"><span>▥</span>Label<small>Read Nutrition Facts</small></button>
-    <button class="act wide" data-act="manual"><span>✎</span>Manual entry</button>
+    <button class="act" data-act="manual"><span>✎</span>Manual<small>Enter values</small></button>
   </div>
   <h3 class="hrow">Favorites and saved meals <button class="mini" data-act="newmeal">+ Create meal</button></h3>`;
-  h += favList(favs, true) + recentList();
+  h += (favs.length ? `<p class="hint" style="margin:-4px 4px 8px">Long-press any item to edit it. Swipe left to delete.</p>` : '') + favList(favs, true) + recentList();
   $('#tab-add').innerHTML = h;
   $('#lw_date').onchange = ev => { const v = ev.target.value;
     if (!v) { logDate = null; return refresh(); }
     if (validDate(v)) { logDate = v === todayStr() ? null : v; refresh(); } else { toast("Pick today or an earlier date"); ev.target.value = logDate || todayStr(); } };
-  $('#lw_time').onchange = ev => { if (!ev.target.value) { logTime = null; return refresh(); } logTime = ev.target.value; curMeal = mealForHour(+logTime.split(':')[0]); refresh(); };
+  $('#lw_time').onchange = ev => { if (!ev.target.value) { logTime = null; return refresh(); } logTime = ev.target.value; curMeal = mealForTime(logTime); refresh(); };
   if ($('#lw_now')) $('#lw_now').onclick = () => { logDate = null; logTime = null; curMeal = defaultMeal(); refresh(); };
 }
 function favList(favs, editable){
   return favs.length ? favs.map(f => `<div class="swipe" data-swipe="fav" data-id="${f.id}"><div class="swipe-bg">Delete</div>
-      <div class="row" data-act="usefav" data-id="${f.id}" role="button" tabindex="0"><div class="ic">${f.items ? '▣' : '★'}</div>
+      <div class="row" data-act="usefav" data-id="${f.id}" role="button" tabindex="0">${(f.thumb || f.items?.find(i => i.thumb)?.thumb) ? `<img src="${f.thumb || f.items.find(i => i.thumb).thumb}" alt="">` : `<div class="ic">${f.items ? '▣' : '★'}</div>`}
       <div class="rm"><div class="rn">${esc(f.name)}</div><div class="rd">${f.items ? f.items.length + ' items · ' : ''}P ${r0(f.p)} · C ${r0(f.c)} · F ${r0(f.f)}</div></div>
       <div class="rc">${r0(f.cal)}</div>${editable && f.items ? `<button class="x" data-act="editmeal" data-id="${f.id}" aria-label="Edit meal">✎</button>` : ''}</div></div>`).join('')
     : `<div class="empty">Tap “+ Create meal” to build one, or open any logged entry and tap “Favorite.”</div>`;
@@ -460,7 +526,7 @@ async function renderBuilder(){
     <div class="tot">${r0(t.cal).toLocaleString()} cal · P ${r0(t.p)} · C ${r0(t.c)} · F ${r0(t.f)}</div></div>
   <h3>Items in this meal (${builder.items.length})</h3>`;
   h += builder.items.length ? builder.items.map((i,k) => `<div class="swipe" data-swipe="bitem" data-i="${k}"><div class="swipe-bg">Remove</div>
-      <button class="row" data-act="bitem" data-i="${k}"><div class="ic">•</div><div class="rm"><div class="rn">${esc(i.name)}</div>
+      <button class="row" data-act="bitem" data-i="${k}">${i.thumb ? `<img src="${i.thumb}" alt="">` : '<div class="ic">•</div>'}<div class="rm"><div class="rn">${esc(i.name)}</div>
       <div class="rd">P ${r0(i.p)} · C ${r0(i.c)} · F ${r0(i.f)}</div></div><div class="rc">${r0(i.cal)}</div></button></div>`).join('')
     : `<div class="empty">Add items with the buttons below. Swipe an item left to remove it, or tap it to adjust.</div>`;
   h += `<div class="btns sticky"><button id="b_cancel">Cancel</button><button id="b_save">Save meal</button><button class="primary" id="b_log">Save and log</button></div>
@@ -468,8 +534,9 @@ async function renderBuilder(){
     <button class="act" data-act="photo"><span>◉</span>Photo</button>
     <button class="act" data-act="describe"><span>Aa</span>Describe</button>
     <button class="act" data-act="scan"><span>▦</span>Barcode</button>
+    <button class="act" data-act="search"><span>⌕</span>Search</button>
     <button class="act" data-act="label"><span>▥</span>Label</button>
-    <button class="act wide" data-act="manual"><span>✎</span>Manual entry</button></div>
+    <button class="act" data-act="manual"><span>✎</span>Manual</button></div>
   <p class="hint">Photos, labels and descriptions need a connection while you build. Favorites, recent foods and barcodes you've scanned before work offline.</p>
   <h3>Favorites and saved meals</h3>` + favList(favs, false) + recentList();
   $('#tab-add').innerHTML = h;
@@ -482,7 +549,7 @@ async function saveBuilder(log){
   if (!builder.items.length) return toast('Add at least one item');
   const t = totals(builder.items);
   const f = {id:builder.id || uid(), name:builder.name.trim() || 'Custom meal', cal:r1(t.cal), p:r1(t.p), c:r1(t.c), f:r1(t.f),
-    items:builder.items.map(i => ({name:i.name, cal:r1(i.cal), p:r1(i.p), c:r1(i.c), f:r1(i.f)})), used:Date.now()};
+    items:builder.items.map(i => ({name:i.name, cal:r1(i.cal), p:r1(i.p), c:r1(i.c), f:r1(i.f), thumb:i.thumb})), used:Date.now()};
   await idb.put('favorites', f); builder = null;
   if (log) await useFav(f.id); else { toast('Meal saved'); refresh(); }
 }
@@ -490,10 +557,10 @@ function bItemSheet(k){
   const i = builder.items[k]; if (!i) return;
   sheet(`<h2>Edit item</h2><label>Name<input id="bi_name" value="${esc(i.name)}"></label>
     <div class="grid4">${numF('bi_cal','Calories',r1(i.cal))}${numF('bi_p','Protein (g)',r1(i.p))}${numF('bi_c','Carbs (g)',r1(i.c))}${numF('bi_f','Fat (g)',r1(i.f))}</div>
-    <label>Multiply by<input id="bi_k" type="number" inputmode="decimal" step="0.25" value="1"></label>
+    ${amtInput('bi_k', 'Multiply by')}${fracChips('bi_k')}
     <div class="btns"><button class="danger" id="bi_del">Remove</button><button class="primary" id="bi_save">Save</button></div>`);
-  $('#bi_save').onclick = () => { const v = readMacros('bi_'), m = num($('#bi_k').value) || 1;
-    builder.items[k] = {name:v.name || i.name, cal:r1(v.cal*m), p:r1(v.p*m), c:r1(v.c*m), f:r1(v.f*m)}; closeSheet(); renderAdd(); };
+  $('#bi_save').onclick = () => { const v = readMacros('bi_'), m = amtOf('bi_k') || 1;
+    builder.items[k] = {name:v.name || i.name, cal:r1(v.cal*m), p:r1(v.p*m), c:r1(v.c*m), f:r1(v.f*m), thumb:i.thumb}; closeSheet(); renderAdd(); };
   $('#bi_del').onclick = () => { builder.items.splice(k, 1); closeSheet(); renderAdd(); };
 }
 async function addToBuilder(o){
@@ -511,7 +578,7 @@ async function addToBuilder(o){
     if (e.items?.length > 1) { e.items.forEach(i => builder.items.push({name:i.name, cal:r1(i.cal), p:r1(i.p), c:r1(i.c), f:r1(i.f)})); toast(`Added ${e.items.length} items to meal`); if (curTab === 'add') renderAdd(); return; }
     o = e;
   }
-  builder.items.push({name:o.name, cal:r1(o.cal), p:r1(o.p), c:r1(o.c), f:r1(o.f)});
+  builder.items.push({name:o.name, cal:r1(o.cal), p:r1(o.p), c:r1(o.c), f:r1(o.f), thumb:o.thumb});
   toast('Added to meal'); if (curTab === 'add') renderAdd();
 }
 
@@ -525,8 +592,10 @@ async function addEntry(o){
 }
 async function useFav(id){
   const f = await idb.get('favorites', id); if (!f) return;
-  if (f.items) for (const i of f.items) await addEntry({name:i.name, cal:i.cal, p:i.p, c:i.c, f:i.f, source:'fav'});
-  else await addEntry({name:f.name, cal:f.cal, p:f.p, c:f.c, f:f.f, source:'fav'});
+  if (f.items && builder) for (const i of f.items) await addEntry({name:i.name, cal:i.cal, p:i.p, c:i.c, f:i.f, source:'fav', thumb:i.thumb}); // building a meal: keep its parts
+  else if (f.items) await addEntry({name:f.name, cal:f.cal, p:f.p, c:f.c, f:f.f, source:'fav', thumb:f.thumb || f.items.find(i => i.thumb)?.thumb,
+    items:f.items.map(i => ({name:i.name, cal:i.cal, p:i.p, c:i.c, f:i.f}))}); // log a saved meal as one line
+  else await addEntry({name:f.name, cal:f.cal, p:f.p, c:f.c, f:f.f, source:'fav', thumb:f.thumb});
   f.used = Date.now(); await idb.put('favorites', f);
   toast(addedMsg());
 }
@@ -549,7 +618,7 @@ function manualSheet(pre = {}){
   $('#m_save').onclick = async () => {
     const v = readMacros('m_');
     if (!v.name) return toast('Add a name first');
-    await addEntry({...v, source: pre.code ? 'barcode' : 'manual'});
+    await addEntry({...v, source: pre.code ? 'barcode' : 'manual', thumb:pre.thumb});
     if (pre.code) await idb.put('products', {code:pre.code, name:v.name, serving:{label:'1 serving', cal:v.cal, p:v.p, c:v.c, f:v.f}, ts:Date.now()});
     if ($('#m_fav').checked) await idb.put('favorites', {id:uid(), ...v, used:Date.now()});
     closeSheet(); toast(addedMsg());
@@ -596,19 +665,21 @@ async function entrySheet(id){
     h += `<label>Name<input id="e_name" value="${esc(e.name)}"></label>
       <div class="grid4">${numF('e_cal','Calories',e.cal)}${numF('e_p','Protein (g)',e.p)}${numF('e_c','Carbs (g)',e.c)}${numF('e_f','Fat (g)',e.f)}</div>
       <div class="grid4"><label>Meal<select id="e_meal">${MEALS.map(m => `<option value="${m}" ${m===e.meal?'selected':''}>${MEAL_LABEL[m]}</option>`).join('')}</select></label>
-      <label>Multiply by<input id="e_scale" type="number" inputmode="decimal" step="0.25" value="1"></label></div>
+      ${amtInput('e_scale', 'Multiply by')}</div>${fracChips('e_scale')}
       ${whenFields(e)}
       <p class="hint">Use “Multiply by” for portions: 0.5 if you ate half, 2 for a double.</p>
       <div class="btns"><button class="danger" id="e_del">Delete</button><button id="e_fav">Favorite</button>${e.date !== todayStr() ? '<button id="e_copy">Log today</button>' : ''}<button class="primary" id="e_save">Save</button></div>`;
     sheet(h);
-    const read = () => { const v = readMacros('e_'), k = num($('#e_scale').value) || 1; return {...v, cal:v.cal*k, p:v.p*k, c:v.c*k, f:v.f*k}; };
+    const read = () => { const v = readMacros('e_'), k = amtOf('e_scale') || 1; return {...v, cal:v.cal*k, p:v.p*k, c:v.c*k, f:v.f*k}; };
     $('#e_save').onclick = async () => {
       const v = read(); if (!v.name) return toast('Add a name first');
       const oldDate = e.date; if (!applyWhen(e)) return;
+      const k = amtOf('e_scale') || 1;
+      if (k !== 1 && e.items) e.items = e.items.map(i => ({...i, cal:r1(i.cal*k), p:r1(i.p*k), c:r1(i.c*k), f:r1(i.f*k)}));
       Object.assign(e, v, {meal:$('#e_meal').value}); for (const k of ['cal','p','c','f']) e[k] = r1(e[k]);
       await idb.put('entries', e); closeSheet(); toast(e.date !== oldDate ? `Moved to ${shortD(e.date)}` : 'Saved'); refresh();
     };
-    $('#e_fav').onclick = async () => { const v = read(); await idb.put('favorites', {id:uid(), name:v.name || 'Favorite', cal:r1(v.cal), p:r1(v.p), c:r1(v.c), f:r1(v.f), used:Date.now()}); toast('Saved to favorites'); };
+    $('#e_fav').onclick = async () => { const v = read(); await idb.put('favorites', {id:uid(), name:v.name || 'Favorite', cal:r1(v.cal), p:r1(v.p), c:r1(v.c), f:r1(v.f), thumb:e.thumb, used:Date.now()}); toast('Saved to favorites'); };
     if ($('#e_copy')) $('#e_copy').onclick = async () => {
       const v = read();
       await addEntry({name:v.name, cal:v.cal, p:v.p, c:v.c, f:v.f, source:e.source, thumb:e.thumb, items:e.items, meal:$('#e_meal').value, date:todayStr(), time:hhmm(new Date())});
@@ -702,7 +773,7 @@ $('#photoInput').onchange = async ev => {
     const x = await exifDate(file);
     if (x && validDate(x.date) && Math.abs(tsOf(x.date, x.time) - Date.now()) > 30*60000) taken = x;
   }
-  const meal = () => taken && ($('#p_when') ? $('#p_when').checked : true) ? mealForHour(+taken.time.split(':')[0]) : curMeal;
+  const meal = () => taken && ($('#p_when') ? $('#p_when').checked : true) ? mealForTime(taken.time) : curMeal;
   sheet(`<h2>Log a photo</h2><img class="prev" src="${thumb}" alt="">
     ${taken ? `<label class="chk"><input type="checkbox" id="p_when" checked> Log it when the photo was taken: ${taken.date === todayStr() ? 'today' : shortD(taken.date)}, ${fmtTime(taken.time)}</label>` : ''}
     <label>Note (optional, improves accuracy)<textarea id="p_note" placeholder="About 2 cups of rice, cooked in butter"></textarea></label>
@@ -772,7 +843,7 @@ function describeSheet(){
 const TEXT_SYS = `You estimate nutrition for foods described in text, for a calorie tracker. Split the description into its distinct items.
 If an item is a restaurant chain menu item or a packaged brand product, use that company's published nutrition information for the standard item, including default dressings, sauces and toppings unless the user says otherwise. If a web search tool is available, use it to look up the official numbers for chain or brand items. Otherwise estimate typical portions.
 Your final answer must be ONLY a JSON object, no markdown, in this shape:
-{"meal_name":"short name","items":[{"name":"food","portion":"e.g. full size","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0}],"confidence":"low|medium|high","source":"published|estimate","notes":"one short sentence on assumptions"}`;
+{"meal_name":"short name","photo_term":"2-3 word generic name of the main dish for a stock photo, e.g. chicken salad","items":[{"name":"food","portion":"e.g. full size","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0}],"confidence":"low|medium|high","source":"published|estimate","notes":"one short sentence on assumptions"}`;
 async function resolveText(e){
   const content = 'Estimate the nutrition for: ' + e.pending.desc;
   const WEB_LOOKUP = false; // set true to let Claude search the web for official chain/brand nutrition (about 1¢ per lookup)
@@ -780,7 +851,9 @@ async function resolveText(e){
   let txt;
   try { txt = await callClaude(content, 2500, TEXT_SYS, tools); }
   catch (err) { if (tools && err instanceof HttpErr && err.status === 400) txt = await callClaude(content, 2500, TEXT_SYS); else throw err; } // web search unavailable: estimate without it
-  applyEstimate(e, parseJSON(txt), "That description couldn't be estimated. Add more detail or enter it manually.");
+  const d = parseJSON(txt);
+  applyEstimate(e, d, "That description couldn't be estimated. Add more detail or enter it manually.");
+  e.thumb = (await wikiThumb(d.photo_term || e.name)) || e.thumb;
   await idb.put('entries', e);
 }
 
@@ -789,7 +862,7 @@ function labelSheet(full, thumb, code){
   const now = navigator.onLine && S.apiKey;
   sheet(`<h2>Log from a label</h2><img class="prev" src="${thumb}" alt="">
     <label>Food name<input id="l_name" placeholder="Leave blank to use the name on the package"></label>
-    <label>Servings you ate<input id="l_sv" type="number" inputmode="decimal" step="0.25" value="1"></label>
+    ${amtInput('l_sv', 'Servings you ate')}${fracChips('l_sv')}
     ${code ? `<p class="hint">The label values will be saved to barcode ${esc(code)}, so the next scan works offline.</p>` : ''}
     <p class="hint">${now ? 'The label will be read right away.' : 'It will be queued and read automatically when you are back online' + (S.apiKey ? '.' : ', once your API key is added in Settings.')}
       The food is also saved to your favorites.</p>
@@ -798,7 +871,7 @@ function labelSheet(full, thumb, code){
     const id = uid(), name = $('#l_name').value.trim();
     await idb.put('photos', {id, data:full});
     await addEntry({id, name:name || 'Nutrition label', cal:0, p:0, c:0, f:0, source:'label', thumb, status:'pending',
-      pending:{type:'label', name, servings:num($('#l_sv').value) || 1, code:code || null}});
+      pending:{type:'label', name, servings:amtOf('l_sv') || 1, code:code || null}});
     if (builder) return; closeSheet(); toast(now ? 'Reading label…' : 'Queued for reading'); processQueue();
   };
 }
@@ -815,30 +888,71 @@ async function resolveLabel(e){
   const s = {label:String(d.serving_size || '1 serving'), cal:num(d.calories), p:num(d.protein_g), c:num(d.carbs_g), f:num(d.fat_g)};
   const n = e.pending.servings || 1, code = e.pending.code;
   const name = e.pending.name || String(d.product_name || '').trim() || 'Labeled food';
-  if (code) await idb.put('products', {code, name, serving:s, ts:Date.now()});
+  if (code) await idb.put('products', normalizeProduct({code, name, serving:s, ts:Date.now()}));
   await idb.put('favorites', {id:uid(), name:`${name} (${s.label})`, cal:r1(s.cal), p:r1(s.p), c:r1(s.c), f:r1(s.f), used:Date.now()});
-  Object.assign(e, {name:name + (n !== 1 ? ` ×${n}` : ''), cal:r1(s.cal*n), p:r1(s.p*n), c:r1(s.c*n), f:r1(s.f*n),
+  Object.assign(e, {name:name + (n !== 1 ? ` (${amtText(n, 'serving')})` : ''), cal:r1(s.cal*n), p:r1(s.p*n), c:r1(s.c*n), f:r1(s.f*n),
     serving:s.label, code:code || undefined, status:'ok', pending:null, error:null});
   await idb.put('entries', e); await idb.del('photos', e.id);
 }
 
 /* ---------- Barcode ---------- */
+const OFF_FIELDS = 'code,product_name,brands,nutriments,serving_size,serving_quantity,serving_quantity_unit,image_front_small_url,image_front_thumb_url';
+function normalizeOFF(p, code){
+  const n = p.nutriments || {};
+  const kcal100 = n['energy-kcal_100g'] ?? (n['energy_100g'] != null ? n['energy_100g'] / 4.184 : null);
+  const sq = num(p.serving_quantity) || null;
+  const liquid = /ml/i.test(p.serving_quantity_unit || '') || /\d\s*ml\b|fl\.?\s?oz/i.test(p.serving_size || '');
+  let serving, size = null;
+  if (n['energy-kcal_serving'] != null) { serving = {label:p.serving_size || '1 serving', cal:num(n['energy-kcal_serving']), p:num(n.proteins_serving), c:num(n.carbohydrates_serving), f:num(n.fat_serving)}; size = sq; }
+  else if (kcal100 != null) { const g = sq || 100; serving = {label:p.serving_size || g + (liquid ? ' ml' : ' g'), cal:num(kcal100)*g/100, p:num(n.proteins_100g)*g/100, c:num(n.carbohydrates_100g)*g/100, f:num(n.fat_100g)*g/100}; size = g; }
+  else return null;
+  const brand = (p.brands || '').split(',')[0].trim();
+  const pn = String(p.product_name || '').trim();
+  const name = (brand && !pn.toLowerCase().startsWith(brand.toLowerCase()) ? [brand, pn] : [pn || brand]).filter(Boolean).join(' ') || 'Product ' + code;
+  return normalizeProduct({code:String(code), name, serving, size, basis:size ? (liquid ? 'ml' : 'g') : undefined, image:p.image_front_small_url || p.image_front_thumb_url || null, ts:Date.now()});
+}
 async function fetchOFF(code){
-  const r = await netFetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,brands,nutriments,serving_size,serving_quantity`);
+  const r = await netFetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=${OFF_FIELDS}`);
   if (r.status === 404) return null;
   if (!r.ok) throw new HttpErr(r.status, 'Food database error ' + r.status);
   const j = await r.json(); if (j.status !== 1 || !j.product) return null;
-  const p = j.product, n = p.nutriments || {};
-  const kcal100 = n['energy-kcal_100g'] ?? (n['energy_100g'] != null ? n['energy_100g'] / 4.184 : null);
-  const sq = num(p.serving_quantity) || null;
-  let serving;
-  if (n['energy-kcal_serving'] != null) serving = {label:p.serving_size || '1 serving', cal:num(n['energy-kcal_serving']), p:num(n.proteins_serving), c:num(n.carbohydrates_serving), f:num(n.fat_serving)};
-  else if (kcal100 != null) { const g = sq || 100; serving = {label:p.serving_size || g + ' g', cal:num(kcal100)*g/100, p:num(n.proteins_100g)*g/100, c:num(n.carbohydrates_100g)*g/100, f:num(n.fat_100g)*g/100}; }
-  else return null;
-  const brand = (p.brands || '').split(',')[0].trim();
-  const name = [brand, p.product_name].filter(Boolean).join(' ') || 'Product ' + code;
-  return {code, name, serving, ts:Date.now()};
+  return normalizeOFF(j.product, code);
 }
+
+/* ---------- Food search ---------- */
+let searchCache = {local:[], remote:[]};
+function searchSheet(){
+  sheet(`<h2>Search foods</h2>
+    <div class="srow"><input id="fs_q" placeholder="Greek yogurt, Cheerios, Coke…" enterkeyhint="search" autocomplete="off"><button id="fs_go">Search</button></div>
+    <p class="hint">Searches packaged and grocery foods. For restaurant meals, use Describe.</p><div id="fs_res"></div>`);
+  setTimeout(() => $('#fs_q')?.focus(), 50);
+  const go = () => { const q = $('#fs_q').value.trim(); if (q.length < 2) return toast('Type at least 2 letters'); runSearch(q); };
+  $('#fs_go').onclick = go; $('#fs_q').onkeydown = ev => { if (ev.key === 'Enter') go(); };
+}
+function prodRow(p, src, i){
+  const img = p.thumb || p.image;
+  return `<button class="row" data-act="pickprod" data-src="${src}" data-i="${i}">${img ? `<img src="${img}" alt="" onerror="this.style.visibility='hidden'">` : `<div class="ic">▦</div>`}
+    <div class="rm"><div class="rn">${esc(p.name)}</div><div class="rd">${r0(p.serving.cal)} cal per ${esc(p.serving.label)}</div></div></button>`;
+}
+async function runSearch(q){
+  const ql = q.toLowerCase(), words = ql.split(/\s+/);
+  const local = (await idb.all('products')).filter(p => words.every(w => p.name.toLowerCase().includes(w))).slice(0, 10);
+  searchCache = {local, remote:[]};
+  let html = local.length ? `<h3>Saved on this phone</h3>` + local.map((p,i) => prodRow(p, 'local', i)).join('') : '';
+  const out = () => { if ($('#fs_res')) $('#fs_res').innerHTML = html; };
+  if (!navigator.onLine) { html += `<p class="hint">You're offline, so only foods saved on this phone are shown.</p>`; return out(); }
+  html += `<p class="hint" id="fs_wait">Searching the food database…</p>`; out(); html = html.replace(/<p class="hint" id="fs_wait">.*?<\/p>/, '');
+  try {
+    const r = await netFetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=25&fields=${OFF_FIELDS}`);
+    if (!r.ok) throw new HttpErr(r.status, 'Search error ' + r.status);
+    const seen = new Set(local.map(p => p.code));
+    searchCache.remote = ((await r.json()).products || []).map(p => p.code && normalizeOFF(p, p.code)).filter(p => p && !seen.has(p.code));
+    html += searchCache.remote.length ? `<h3>Food database</h3>` + searchCache.remote.map((p,i) => prodRow(p, 'remote', i)).join('')
+      : `<p class="hint">No matches. Try fewer or different words, scan the barcode, or use Describe.</p>`;
+  } catch (err) { html += `<p class="hint">${transient(err) ? 'No connection right now.' : 'Search failed. Try again in a moment.'}</p>`; }
+  out();
+}
+
 let stream = null, scanTimer = null;
 function stopCam(){ clearTimeout(scanTimer); if (stream){ stream.getTracks().forEach(t => t.stop()); stream = null; } }
 async function scanSheet(){
@@ -876,27 +990,39 @@ async function handleBarcode(code){
   } catch (err) {
     if (!transient(err)) { toast(err.message); return manualSheet({code}); }
     sheet(`<h2>No connection</h2><p>Barcode <b>${esc(code)}</b> isn't saved on this phone yet. Queue it and it will be looked up automatically when you reconnect.</p>
-      <label>Servings<input id="q_sv" type="number" inputmode="decimal" step="0.25" value="1"></label>
+      ${amtInput('q_sv', 'Servings')}${fracChips('q_sv')}
       <div class="btns"><button id="q_man">Enter manually</button><button id="q_lbl">Scan the label</button><button class="primary" id="q_go">Queue it</button></div>`);
     $('#q_lbl').onclick = () => scanLabelFor(code);
     $('#q_go').onclick = async () => {
-      await addEntry({name:'Barcode ' + code, cal:0, p:0, c:0, f:0, source:'barcode', status:'pending', pending:{type:'barcode', code, servings:num($('#q_sv').value) || 1}});
+      await addEntry({name:'Barcode ' + code, cal:0, p:0, c:0, f:0, source:'barcode', status:'pending', pending:{type:'barcode', code, servings:amtOf('q_sv') || 1}});
       if (builder) return; closeSheet(); toast('Queued for lookup');
     };
     $('#q_man').onclick = () => manualSheet({code});
   }
 }
-function servingSheet(p){
-  const s = p.serving;
-  sheet(`<h2>${esc(p.name)}</h2><p class="hint">One serving (${esc(s.label)}): ${r0(s.cal)} cal, P ${r1(s.p)}, C ${r1(s.c)}, F ${r1(s.f)}</p>
-    <label>Servings<input id="s_n" type="number" inputmode="decimal" step="0.25" value="1"></label>
+function servingSheet(p, source = 'barcode'){
+  normalizeProduct(p);
+  const s = p.serving, units = unitsFor(p);
+  const thumbP = navigator.onLine ? productThumb(p) : Promise.resolve(p.thumb || null);
+  const img = p.thumb || p.image;
+  sheet(`${img ? `<img class="pimg" src="${img}" alt="" onerror="this.remove()">` : ''}<h2>${esc(p.name)}</h2>
+    <p class="hint">One serving (${esc(s.label)}): ${r0(s.cal)} cal, P ${r1(s.p)}, C ${r1(s.c)}, F ${r1(s.f)}</p>
+    <div class="grid4" style="clear:both">${amtInput('s_n', 'Amount')}<label>Unit<select id="s_u">${units.map(u => `<option value="${u}">${UNITS[u].l}</option>`).join('')}</select></label></div>
+    ${fracChips('s_n')}
+    ${units.length === 1 ? '<p class="hint">Weight and volume units appear when the package lists a serving size in grams or ml.</p>' : ''}
     <div id="s_tot" class="tot"></div>
     <div class="btns"><button id="s_edit">Edit values</button><button class="primary" id="s_add">${addLabel()}</button></div>`);
-  const upd = () => { const n = num($('#s_n').value); $('#s_tot').textContent = `${r0(s.cal*n)} cal · P ${r0(s.p*n)} · C ${r0(s.c*n)} · F ${r0(s.f*n)}`; };
-  $('#s_n').oninput = upd; upd();
+  const factor = () => { const a = amtOf('s_n'), u = $('#s_u').value; return isNaN(a) ? NaN : u === 'serving' ? a : a * UNITS[u].f / p.size; };
+  const upd = () => { const k = factor(); $('#s_tot').textContent = isNaN(k) ? 'Enter an amount like 1.5 or 1 1/2' : `${r0(s.cal*k)} cal · P ${r0(s.p*k)} · C ${r0(s.c*k)} · F ${r0(s.f*k)}`; };
+  $('#s_n').oninput = upd;
+  $('#s_u').onchange = () => { const u = $('#s_u').value;
+    $('#s_n').value = u === 'serving' ? '1' : fmtAmt(Math.round(p.size / UNITS[u].f * (u === 'lb' ? 100 : u === 'g' || u === 'ml' ? 1 : 10)) / (u === 'lb' ? 100 : u === 'g' || u === 'ml' ? 1 : 10)); upd(); };
+  upd();
   $('#s_add').onclick = async () => {
-    const n = num($('#s_n').value) || 1;
-    await addEntry({name:p.name + (n !== 1 ? ` ×${n}` : ''), cal:s.cal*n, p:s.p*n, c:s.c*n, f:s.f*n, source:'barcode', code:p.code});
+    const k = factor(); if (!(k > 0)) return toast('Enter an amount like 1.5 or 1 1/2');
+    const a = amtOf('s_n'), u = $('#s_u').value;
+    const thumb = (await Promise.race([thumbP, new Promise(r => setTimeout(() => r(null), 2000))])) || p.thumb || p.image || undefined;
+    await addEntry({name:p.name + (u === 'serving' && a === 1 ? '' : ` (${amtText(a, u)})`), cal:s.cal*k, p:s.p*k, c:s.c*k, f:s.f*k, source, code:p.code, thumb});
     closeSheet(); toast(addedMsg());
   };
   $('#s_edit').onclick = () => manualSheet({title:'Edit product values', code:p.code, name:p.name, cal:r1(s.cal), p:r1(s.p), c:r1(s.c), f:r1(s.f)});
@@ -905,8 +1031,8 @@ async function resolveBarcode(e){
   const code = e.pending.code, n = e.pending.servings || 1;
   let p = await idb.get('products', code);
   if (!p){ p = await fetchOFF(code); if (!p) throw new Error(`Barcode ${code} isn't in the food database. Tap Enter manually.`); await idb.put('products', p); }
-  const s = p.serving;
-  Object.assign(e, {name:p.name + (n !== 1 ? ` ×${n}` : ''), cal:r1(s.cal*n), p:r1(s.p*n), c:r1(s.c*n), f:r1(s.f*n), code, status:'ok', pending:null, error:null});
+  const s = p.serving, thumb = await productThumb(p);
+  Object.assign(e, {name:p.name + (n !== 1 ? ` (${amtText(n, 'serving')})` : ''), cal:r1(s.cal*n), p:r1(s.p*n), c:r1(s.c*n), f:r1(s.f*n), code, thumb:thumb || p.image || e.thumb, status:'ok', pending:null, error:null});
   await idb.put('entries', e);
 }
 
@@ -1049,7 +1175,45 @@ $('#importInput').onchange = async ev => {
 
 /* ---------- wiring ---------- */
 /* ---------- Swipe left to delete ---------- */
-let sw = null, swipedAt = 0;
+let sw = null, swipedAt = 0, swipedWrap = null;
+/* ---------- Long press to edit ---------- */
+let lp = null, pressedAt = 0, pressedRow = null;
+document.addEventListener('pointerdown', ev => {
+  const row = ev.target.closest('.row[data-act]'); if (!row || ev.button > 0 || ev.target.closest('.x')) return;
+  lp = {row, x:ev.clientX, y:ev.clientY, t:setTimeout(() => {
+    row.classList.remove('pressing'); lp = null; pressedAt = Date.now(); pressedRow = row; sw = null;
+    navigator.vibrate?.(30); longPress(row);
+  }, 500)};
+  row.classList.add('pressing');
+}, true);
+const cancelLP = () => { if (lp) { clearTimeout(lp.t); lp.row.classList.remove('pressing'); lp = null; } };
+document.addEventListener('pointermove', ev => { if (lp && Math.hypot(ev.clientX - lp.x, ev.clientY - lp.y) > 10) cancelLP(); }, true);
+document.addEventListener('pointerup', cancelLP, true);
+document.addEventListener('pointercancel', cancelLP, true);
+document.addEventListener('contextmenu', ev => { if (ev.target.closest('.row')) ev.preventDefault(); });
+function longPress(row){
+  const d = row.dataset;
+  switch (d.act){
+    case 'entry': entrySheet(d.id); break;
+    case 'usefav': favSheet(d.id); break;
+    case 'userecent': { const e = recentCache[+d.i]; if (e) manualSheet({title:'Edit, then log', name:e.name, cal:r1(e.cal), p:r1(e.p), c:r1(e.c), f:r1(e.f), thumb:e.thumb}); break; }
+    case 'bitem': bItemSheet(+d.i); break;
+    case 'pickprod': row.click(); break;
+  }
+}
+async function favSheet(id){
+  const f = await idb.get('favorites', id); if (!f) return;
+  if (f.items) { builder = {id:f.id, name:f.name, items:f.items.map(i => ({...i}))}; showTab('add'); return; } // saved meals open in the meal editor
+  sheet(`${f.thumb ? `<img class="pimg" src="${f.thumb}" alt="">` : ''}<h2>Edit favorite</h2>
+    <label style="clear:both">Name<input id="fv_name" value="${esc(f.name)}"></label>
+    <div class="grid4">${numF('fv_cal','Calories',r1(f.cal))}${numF('fv_p','Protein (g)',r1(f.p))}${numF('fv_c','Carbs (g)',r1(f.c))}${numF('fv_f','Fat (g)',r1(f.f))}</div>
+    <div class="btns"><button class="danger" id="fv_del">Delete</button><button id="fv_log">Save and log</button><button class="primary" id="fv_save">Save</button></div>`);
+  const save = async () => { const v = readMacros('fv_'); if (!v.name) { toast('Add a name first'); return false; } Object.assign(f, v); await idb.put('favorites', f); return true; };
+  $('#fv_save').onclick = async () => { if (await save()) { closeSheet(); toast('Favorite saved'); refresh(); } };
+  $('#fv_log').onclick = async () => { if (await save()) { closeSheet(); await useFav(f.id); } };
+  $('#fv_del').onclick = async () => { await idb.del('favorites', f.id); closeSheet(); refresh(); toast(`Deleted ${f.name.slice(0, 30)}`, async () => { await idb.put('favorites', f); refresh(); }); };
+}
+
 document.addEventListener('pointerdown', ev => {
   const wrap = ev.target.closest('.swipe'); if (!wrap || ev.button > 0 || ev.target.closest('.x')) return;
   sw = {wrap, row:wrap.querySelector('.row'), x0:ev.clientX, y0:ev.clientY, dx:0, active:false, pid:ev.pointerId};
@@ -1067,7 +1231,7 @@ document.addEventListener('pointermove', ev => {
 });
 function endSwipe(){
   if (!sw) return; const s = sw; sw = null; if (!s.active) return;
-  swipedAt = Date.now(); const w = s.wrap.offsetWidth;
+  swipedAt = Date.now(); swipedWrap = s.wrap; const w = s.wrap.offsetWidth;
   s.row.style.transition = 'transform .18s ease';
   if (-s.dx > w * 0.35) { s.row.style.transform = `translateX(${-w}px)`; navigator.vibrate?.(20); setTimeout(() => swipeDelete(s.wrap), 170); }
   else { s.row.style.transform = ''; s.wrap.classList.remove('arm'); }
@@ -1091,7 +1255,8 @@ async function swipeDelete(wrap){
 }
 
 document.addEventListener('click', ev => {
-  if (Date.now() - swipedAt < 400) { ev.preventDefault(); return; } // a swipe isn't a tap
+  // the tap that ends a swipe or long press on a row isn't a real tap
+  if ((Date.now() - swipedAt < 400 && ev.target.closest('.swipe') === swipedWrap) || (Date.now() - pressedAt < 700 && ev.target.closest('.row') === pressedRow)) { ev.preventDefault(); return; }
   const el = ev.target.closest('[data-act],[data-tab]'); if (!el) return;
   if (el.dataset.tab) return showTab(el.dataset.tab);
   const d = el.dataset;
@@ -1105,6 +1270,9 @@ document.addEventListener('click', ev => {
     case 'scan': scanSheet(); break;
     case 'manual': manualSheet(); break;
     case 'describe': describeSheet(); break;
+    case 'search': searchSheet(); break;
+    case 'pickprod': { const pr = searchCache[d.src]?.[+d.i]; if (pr) { if (d.src === 'remote') idb.put('products', pr); servingSheet(pr, 'search'); } break; }
+    case 'frac': { const inp = $('#' + el.parentNode.dataset.for); if (inp) { inp.value = d.v; inp.dispatchEvent(new Event('input')); } break; }
     case 'newmeal': builder = {name:'', items:[]}; renderAdd(); window.scrollTo(0,0); break;
     case 'editmeal': idb.get('favorites', d.id).then(f => { if (!f) return; builder = {id:f.id, name:f.name, items:f.items.map(i => ({...i}))}; renderAdd(); window.scrollTo(0,0); }); break;
     case 'bitem': bItemSheet(+d.i); break;
@@ -1126,6 +1294,9 @@ document.addEventListener('keydown', ev => {
 
 (async () => {
   await loadSettings();
+  try { // one-time move of entries from the old single "Snacks" section into morning/afternoon/evening snacks
+    for (const e of (await idb.all('entries')).filter(e => e.meal === 'snack')) { const m = mealForTime(entTime(e)); e.meal = SNACKS.has(m) ? m : {breakfast:'snack_am', lunch:'snack_pm', dinner:'snack_eve'}[m]; await idb.put('entries', e); }
+  } catch {}
   try { await navigator.storage?.persist?.(); } catch {}
   showTab('today');
   processQueue();

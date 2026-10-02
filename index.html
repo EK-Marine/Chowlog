@@ -67,6 +67,23 @@ h3{font-size:15px;color:var(--mute);font-weight:600;margin:22px 4px 8px}
 .k-p{background:#7fa9d6}.k-c{background:var(--coyote)}.k-f{background:#c39ac7}
 .mbar.over i{background:var(--signal)}
 
+.cal{padding:10px 8px 6px}
+.cal-mh{display:flex;align-items:center;justify-content:space-between;padding:0 4px 6px}
+.cal-mh b{font-size:16px}
+.cal-nav{background:none;border:0;font-size:22px;width:40px;height:36px;border-radius:50%}
+.cal-nav:disabled{opacity:.25}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
+.cal-wd{font-size:11px;color:var(--mute);padding:2px 0 4px}
+.cal-d{background:none;border:0;border-radius:10px;padding:6px 0 5px;min-height:46px;display:flex;flex-direction:column;align-items:center;gap:4px}
+.cal-d b{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+.cal-d.today b{color:var(--coyote)}
+.cal-d.sel{background:var(--field);color:var(--headink)}
+.cal-d.sel.today b{color:var(--headink)}
+.cal-d.out{opacity:.4}
+.cal-d:disabled{opacity:.22;cursor:default}
+.cal-d i{width:8px;height:8px;border-radius:50%}
+.cal-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 6px 0;font-size:12px;color:var(--mute)}
+.cal-foot .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin:0 3px 0 8px}
 .meal{padding:6px 0 4px}
 .mh{display:flex;align-items:center;gap:8px;padding:8px 14px}
 .mh b{flex:1;font-size:16px}
@@ -97,6 +114,8 @@ h3{font-size:15px;color:var(--mute);font-weight:600;margin:22px 4px 8px}
 .act span{font-size:26px;line-height:1.2}
 .act small{font-weight:400;color:var(--mute);font-size:12px}
 .act.primary-act{background:var(--field);color:var(--headink);border-color:var(--field)}
+.act.wide{grid-column:1 / -1;flex-direction:row;justify-content:center;gap:10px;padding:12px}
+.act.wide span{font-size:20px}
 .pick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:4px 0 8px}
 .act.primary-act small{color:var(--headink);opacity:.7}
 
@@ -250,10 +269,11 @@ const saveSettings = () => idb.put('kv', {k:'settings', v:S});
 
 const MEALS = ['breakfast','lunch','dinner','snack'];
 const MEAL_LABEL = {breakfast:'Breakfast', lunch:'Lunch', dinner:'Dinner', snack:'Snacks'};
-const ICON = {manual:'✎', barcode:'▦', ai:'◉', fav:'★', label:'▥'};
+const ICON = {manual:'✎', barcode:'▦', ai:'◉', fav:'★', label:'▥', text:'Aa'};
 function mealForHour(h){ return h < 10 ? 'breakfast' : h < 14 ? 'lunch' : h < 17 ? 'snack' : h < 21 ? 'dinner' : 'snack'; }
 function defaultMeal(){ const h = new Date().getHours(); return h < 10 ? 'breakfast' : h < 14 ? 'lunch' : h < 17 ? 'snack' : h < 21 ? 'dinner' : 'snack'; }
 let curDate = todayStr(), lastToday = curDate, curTab = 'today', curMeal = defaultMeal(), trendDays = 7, recentCache = [];
+let calOpen = false, calMonth = null; // calendar: week strip by default, month when expanded
 let logTime = null, logDate = null; // null = use the current date/time at the moment you log
 
 /* ---------- UI plumbing ---------- */
@@ -295,13 +315,57 @@ async function refresh(){
   updateBadge();
 }
 
+/* ---------- Calendar ---------- */
+// Within ±5% of target = green. Under = yellow, over = red; each further 5% step away gets more intense (8 steps max).
+function goalColor(cal, target){
+  if (!cal || !target) return '';
+  const r = cal / target;
+  if (r >= 0.95 && r <= 1.05) return 'hsl(135,55%,40%)';
+  const n = Math.min(8, Math.max(1, Math.ceil((r < 0.95 ? 0.95 - r : r - 1.05) / 0.05 - 1e-9))), t = (n - 1) / 7;
+  return r < 0.95
+    ? `hsl(${50 - t*12},${85 + t*15}%,${78 - t*30}%)`   // pale yellow → deep amber
+    : `hsl(${4 - t*4},${70 + t*20}%,${78 - t*40}%)`;   // pale red → deep red
+}
+function weekStart(s){ const [y,m,d] = s.split('-').map(Number); return addDays(s, -new Date(y, m-1, d).getDay()); }
+async function calendarHTML(){
+  const t = todayStr(), month = calMonth || curDate.slice(0,7) + '-01';
+  let days;
+  if (!calOpen) { const ws = weekStart(curDate); days = Array.from({length:7}, (_, i) => addDays(ws, i)); }
+  else {
+    const [y, m] = month.split('-').map(Number), last = ymd(new Date(y, m, 0));
+    days = []; for (let d = weekStart(month), end = addDays(weekStart(last), 6); d <= end; d = addDays(d, 1)) days.push(d);
+  }
+  const tot = {};
+  (await idb.dateRange(days[0], days[days.length-1])).filter(e => e.status === 'ok').forEach(e => { tot[e.date] = (tot[e.date] || 0) + num(e.cal); });
+  let head;
+  if (calOpen) {
+    const [y, m] = month.split('-').map(Number);
+    const title = new Date(y, m-1, 1).toLocaleDateString(undefined, {month:'long', year:'numeric'});
+    head = `<div class="cal-mh"><button class="cal-nav" data-act="calmonth" data-n="-1" aria-label="Previous month">‹</button><b>${title}</b>
+      <button class="cal-nav" data-act="calmonth" data-n="1" aria-label="Next month" ${month >= t.slice(0,7) + '-01' ? 'disabled' : ''}>›</button></div>`;
+  } else {
+    const a = days[0], b = days[6];
+    head = `<div class="cal-mh"><button class="cal-nav" data-act="calweek" data-n="-7" aria-label="Previous week">‹</button><b>${shortD(a)} – ${shortD(b)}</b>
+      <button class="cal-nav" data-act="calweek" data-n="7" aria-label="Next week" ${b >= t ? 'disabled' : ''}>›</button></div>`;
+  }
+  const wd = ['S','M','T','W','T','F','S'].map(x => `<div class="cal-wd">${x}</div>`).join('');
+  const cells = days.map(d => {
+    const c = tot[d], cls = ['cal-d', d === curDate ? 'sel' : '', d === t ? 'today' : '', calOpen && d.slice(0,7) !== month.slice(0,7) ? 'out' : ''].join(' ');
+    return `<button class="${cls}" data-act="pickday" data-d="${d}" ${d > t ? 'disabled' : ''} aria-label="${shortD(d)}${c ? ', ' + r0(c) + ' calories' : ''}">
+      <b>${+d.slice(8)}</b><i style="background:${goalColor(c, S.cal) || 'transparent'}"></i></button>`;
+  }).join('');
+  return `<div class="card cal">${head}<div class="cal-grid">${wd}${cells}</div>
+    <div class="cal-foot"><span><span class="dot" style="background:${goalColor(0.8, 1)}"></span>Under<span class="dot" style="background:${goalColor(1, 1)}"></span>On target<span class="dot" style="background:${goalColor(1.2, 1)}"></span>Over</span>
+    <span>${curDate !== t ? '<button class="link" data-act="pickday" data-d="' + t + '" style="padding:4px 8px">Today</button>' : ''}<button class="link" data-act="caltoggle" style="padding:4px 8px">${calOpen ? 'Show week ▴' : 'Show month ▾'}</button></span></div></div>`;
+}
+
 /* ---------- Today ---------- */
 function macro(label, v, t, k){
   const pct = t ? Math.min(100, v/t*100) : 0;
   return `<div class="mac"><small>${label}</small><b>${r0(v)}<span> / ${t}g</span></b><div class="mbar ${v>t?'over':''}"><i class="k-${k}" style="width:${pct}%"></i></div></div>`;
 }
 function entryRow(e){
-  const st = e.status === 'pending' ? `<span class="tag pend">Queued for ${({photo:'analysis', label:'reading', barcode:'lookup'})[e.pending?.type] || 'processing'}</span>`
+  const st = e.status === 'pending' ? `<span class="tag pend">Queued for ${({photo:'analysis', label:'reading', barcode:'lookup', text:'estimate'})[e.pending?.type] || 'processing'}</span>`
            : e.status === 'error' ? `<span class="tag err">Needs attention</span>` : '';
   return `<button class="row" data-act="entry" data-id="${e.id}">${e.thumb ? `<img src="${e.thumb}" alt="">` : `<div class="ic">${ICON[e.source]||'•'}</div>`}
     <div class="rm"><div class="rn">${esc(e.name)}</div><div class="rd">${fmtTime(entTime(e))} · ${st || `P ${r0(e.p)} · C ${r0(e.c)} · F ${r0(e.f)}`}</div></div>
@@ -312,7 +376,7 @@ async function renderToday(){
   const t = totals(es.filter(e => e.status === 'ok'));
   const left = S.cal - t.cal, filled = Math.round(Math.min(t.cal, S.cal) / S.cal * 20);
   const segs = Array.from({length:20}, (_,i) => `<i class="${left < 0 ? 'ov' : i < filled ? 'on' : ''}"></i>`).join('');
-  let h = `<div class="card gauge">
+  let h = await calendarHTML() + `<div class="card gauge">
     <div><span class="num ${left<0?'over':''}">${Math.abs(r0(left)).toLocaleString()}</span><span class="lbl">${left < 0 ? 'calories over' : 'calories left'}</span></div>
     <div class="sub">${r0(t.cal).toLocaleString()} eaten of ${S.cal.toLocaleString()}</div>
     <div class="segs">${segs}</div>
@@ -344,9 +408,10 @@ async function renderAdd(){
   ${logTime || logDate ? `<p class="when-note">Logging for ${logDate ? shortD(logDate) : 'today'} at ${fmtTime(logTime || hhmm(new Date()))}. <button class="link" id="lw_now" style="padding:0">Reset to now</button></p>` : ''}
   <div class="actions">
     <button class="act primary-act" data-act="photo"><span>◉</span>Photo<small>AI estimate</small></button>
+    <button class="act primary-act" data-act="describe"><span>Aa</span>Describe<small>Type what you ate</small></button>
     <button class="act" data-act="scan"><span>▦</span>Barcode<small>Scan or type</small></button>
     <button class="act" data-act="label"><span>▥</span>Label<small>Read Nutrition Facts</small></button>
-    <button class="act" data-act="manual"><span>✎</span>Manual<small>Enter values</small></button>
+    <button class="act wide" data-act="manual"><span>✎</span>Manual entry</button>
   </div>
   <h3>Favorites and saved meals</h3>`;
   h += favs.length ? favs.map(f => `<div class="row" data-act="usefav" data-id="${f.id}" role="button" tabindex="0"><div class="ic">${f.items ? '▣' : '★'}</div>
@@ -413,15 +478,17 @@ async function entrySheet(id){
     const pt = e.pending?.type, keyNote = S.apiKey ? '.' : ' and an API key is set in Settings.';
     h += `<p class="hint">${pt === 'photo' ? 'This photo is analyzed automatically once you have a connection' + keyNote
         : pt === 'label' ? 'This label is read automatically once you have a connection' + keyNote
+        : pt === 'text' ? 'This description is estimated automatically once you have a connection' + keyNote
         : 'Barcode ' + esc(e.pending?.code) + ' is looked up automatically once you have a connection.'}</p>`;
     h += whenFields(e);
+    if (e.pending?.type === 'text') h += `<label>What you ate<textarea id="e_desc">${esc(e.pending.desc || '')}</textarea></label>`;
     if (e.pending?.type === 'photo') h += `<label>Note for the estimate<textarea id="e_note" placeholder="Portion size, brand, cooking oil…">${esc(e.pending.note || '')}</textarea></label>`;
     h += `<div class="btns"><button class="danger" id="e_del">Delete</button><button id="e_man">Enter manually</button><button id="e_keep">Save</button><button class="primary" id="e_retry">Try now</button></div>`;
     sheet(h);
-    $('#e_keep').onclick = async () => { if (!applyWhen(e)) return; if (e.pending?.type === 'photo') e.pending.note = $('#e_note').value.trim(); await idb.put('entries', e); closeSheet(); toast('Saved'); refresh(); };
+    $('#e_keep').onclick = async () => { if (!applyWhen(e)) return; keepPendingEdits(e); await idb.put('entries', e); closeSheet(); toast('Saved'); refresh(); };
     $('#e_retry').onclick = async () => {
       if (!applyWhen(e)) return;
-      if (e.pending?.type === 'photo') e.pending.note = $('#e_note').value.trim();
+      keepPendingEdits(e);
       e.status = 'pending'; e.error = null; await idb.put('entries', e); closeSheet();
       if (!navigator.onLine) toast('Still offline. It will run automatically when you reconnect.');
       else if (e.pending?.type !== 'barcode' && !S.apiKey) toast('Add your API key in Settings first');
@@ -436,8 +503,9 @@ async function entrySheet(id){
     };
   } else {
     if (e.items?.length) h += `<div class="items">${e.items.map(i => `<div class="irow"><span>${esc(i.name)}${i.portion ? ` <small>(${esc(i.portion)})</small>` : ''}</span><span>${r0(i.cal)}</span></div>`).join('')}
+      ${e.ai?.source === 'published' ? `<p class="hint">Based on published nutrition information${e.ai.notes ? '. ' + esc(e.ai.notes) : '.'}</p>` : ''}
       ${e.source === 'label' ? `<p class="hint">Read from the nutrition label. One serving is ${esc(e.serving || 'as printed')}.</p>`
-        : e.ai ? `<p class="hint">AI estimate, ${esc(e.ai.confidence || 'unknown')} confidence.${e.ai.notes ? ' ' + esc(e.ai.notes) : ''}</p>` : ''}</div>`;
+        : e.ai && e.ai.source !== 'published' ? `<p class="hint">AI estimate, ${esc(e.ai.confidence || 'unknown')} confidence.${e.ai.notes ? ' ' + esc(e.ai.notes) : ''}</p>` : ''}</div>`;
     h += `<label>Name<input id="e_name" value="${esc(e.name)}"></label>
       <div class="grid4">${numF('e_cal','Calories',e.cal)}${numF('e_p','Protein (g)',e.p)}${numF('e_c','Carbs (g)',e.c)}${numF('e_f','Fat (g)',e.f)}</div>
       <div class="grid4"><label>Meal<select id="e_meal">${MEALS.map(m => `<option value="${m}" ${m===e.meal?'selected':''}>${MEAL_LABEL[m]}</option>`).join('')}</select></label>
@@ -463,6 +531,10 @@ async function entrySheet(id){
   $('#e_del').onclick = async () => { await idb.del('entries', e.id); await idb.del('photos', e.id); closeSheet(); toast('Deleted'); refresh(); };
 }
 
+function keepPendingEdits(e){
+  if (e.pending?.type === 'photo') e.pending.note = $('#e_note').value.trim();
+  if (e.pending?.type === 'text') { const d = $('#e_desc').value.trim(); if (d) { e.pending.desc = d; e.name = d.slice(0, 80); } }
+}
 function whenFields(e){
   return `<div class="grid4"><label>Date eaten<input type="date" id="e_date" value="${e.date}" max="${todayStr()}"></label>
     <label>Time eaten<input type="time" id="e_time" value="${entTime(e)}"></label></div>`;
@@ -563,15 +635,18 @@ const SYS = `You estimate nutrition from meal photos for a calorie tracker. Iden
 {"meal_name":"short name for the whole meal","items":[{"name":"food","portion":"e.g. 1 cup","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0}],"confidence":"low|medium|high","notes":"one short sentence on assumptions"}
 If no food is visible, return an empty items array.`;
 
-async function callClaude(content, max = 1500, system){
+async function callClaude(content, max = 1500, system, tools){
   const r = await netFetch('https://api.anthropic.com/v1/messages', {method:'POST',
     headers:{'content-type':'application/json','x-api-key':S.apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-    body:JSON.stringify({model:S.model, max_tokens:max, ...(system ? {system} : {}), messages:[{role:'user', content}]})});
+    body:JSON.stringify({model:S.model, max_tokens:max, ...(system ? {system} : {}), ...(tools ? {tools} : {}), messages:[{role:'user', content}]})});
   if (!r.ok){ let m = ''; try { m = (await r.json()).error?.message || ''; } catch {} throw new HttpErr(r.status, m || 'API error ' + r.status); }
   const j = await r.json();
   return (j.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
 }
-function parseJSON(t){ const s = t.indexOf('{'), e = t.lastIndexOf('}'); if (s < 0 || e < s) throw new Error('The estimate came back in an unreadable format. Tap Try now.'); return JSON.parse(t.slice(s, e+1)); }
+function parseJSON(t){
+  // Prefer the last top-level answer object (web-search replies can include commentary before it).
+  let s = -1; for (const m of t.matchAll(/\{\s*"(meal_name|product_name|items)"/g)) s = m.index;
+  if (s < 0) s = t.indexOf('{'); const e = t.lastIndexOf('}'); if (s < 0 || e < s) throw new Error('The estimate came back in an unreadable format. Tap Try now.'); return JSON.parse(t.slice(s, e+1)); }
 
 async function resolvePhoto(e){
   const ph = await idb.get('photos', e.id);
@@ -580,14 +655,46 @@ async function resolvePhoto(e){
   const txt = await callClaude([
     {type:'image', source:{type:'base64', media_type:'image/jpeg', data:ph.data.split(',')[1]}},
     {type:'text', text:'Estimate the nutrition for this meal.' + note}], 1500, SYS);
-  const d = parseJSON(txt);
+  applyEstimate(e, parseJSON(txt), 'No food was recognized in this photo. Add a note or enter it manually.');
+  await idb.put('entries', e); await idb.del('photos', e.id);
+}
+function applyEstimate(e, d, emptyMsg){
   const items = (d.items || []).map(i => ({name:String(i.name || 'Item'), portion:i.portion ? String(i.portion) : '',
     cal:r1(i.calories), p:r1(i.protein_g), c:r1(i.carbs_g), f:r1(i.fat_g)}));
-  if (!items.length) throw new Error('No food was recognized in this photo. Add a note or enter it manually.');
+  if (!items.length) throw new Error(emptyMsg);
   const t = totals(items);
   Object.assign(e, {name:String(d.meal_name || items.map(i => i.name).join(', ')).slice(0, 80), cal:r1(t.cal), p:r1(t.p), c:r1(t.c), f:r1(t.f),
-    items, ai:{confidence:d.confidence, notes:d.notes}, note:e.pending.note, status:'ok', pending:null, error:null});
-  await idb.put('entries', e); await idb.del('photos', e.id);
+    items, ai:{confidence:d.confidence, notes:d.notes, source:d.source}, note:e.pending?.note, desc:e.pending?.desc, status:'ok', pending:null, error:null});
+}
+
+/* ---------- Describe (type what you ate) ---------- */
+function describeSheet(){
+  const now = navigator.onLine && S.apiKey;
+  sheet(`<h2>Describe what you ate</h2>
+    <label>Description<textarea id="d_txt" placeholder="Wendy's Apple Pecan Chicken Salad, full size, with dressing"></textarea></label>
+    <p class="hint">Include the restaurant or brand, size, and anything added or left off. Several items are fine: "2 eggs, 2 slices wheat toast with butter, black coffee."</p>
+    <p class="hint">${now ? 'It will be estimated right away.' : 'It will be queued and estimated automatically when you are back online' + (S.apiKey ? '.' : ', once your API key is added in Settings.')}</p>
+    <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="d_go">Add to ${MEAL_LABEL[curMeal]}</button></div>`);
+  setTimeout(() => $('#d_txt')?.focus(), 50);
+  $('#d_go').onclick = async () => {
+    const desc = $('#d_txt').value.trim(); if (!desc) return toast('Describe the food first');
+    await addEntry({name:desc.slice(0, 80), cal:0, p:0, c:0, f:0, source:'text', status:'pending', pending:{type:'text', desc}});
+    closeSheet(); toast(now ? 'Estimating…' : 'Queued for estimate'); processQueue();
+  };
+}
+const TEXT_SYS = `You estimate nutrition for foods described in text, for a calorie tracker. Split the description into its distinct items.
+If an item is a restaurant chain menu item or a packaged brand product, use that company's published nutrition information for the standard item, including default dressings, sauces and toppings unless the user says otherwise. If a web search tool is available, use it to look up the official numbers for chain or brand items. Otherwise estimate typical portions.
+Your final answer must be ONLY a JSON object, no markdown, in this shape:
+{"meal_name":"short name","items":[{"name":"food","portion":"e.g. full size","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0}],"confidence":"low|medium|high","source":"published|estimate","notes":"one short sentence on assumptions"}`;
+async function resolveText(e){
+  const content = 'Estimate the nutrition for: ' + e.pending.desc;
+  const WEB_LOOKUP = false; // set true to let Claude search the web for official chain/brand nutrition (about 1¢ per lookup)
+  const tools = WEB_LOOKUP ? [{type:'web_search_20250305', name:'web_search', max_uses:3}] : null;
+  let txt;
+  try { txt = await callClaude(content, 2500, TEXT_SYS, tools); }
+  catch (err) { if (tools && err instanceof HttpErr && err.status === 400) txt = await callClaude(content, 2500, TEXT_SYS); else throw err; } // web search unavailable: estimate without it
+  applyEstimate(e, parseJSON(txt), "That description couldn't be estimated. Add more detail or enter it manually.");
+  await idb.put('entries', e);
 }
 
 /* ---------- Nutrition label ---------- */
@@ -726,7 +833,7 @@ async function processQueue(force){
     for (const e of pend){
       const t = e.pending?.type;
       if (t !== 'barcode' && !S.apiKey) continue;
-      try { await (t === 'barcode' ? resolveBarcode(e) : t === 'label' ? resolveLabel(e) : resolvePhoto(e)); did++; }
+      try { await (t === 'barcode' ? resolveBarcode(e) : t === 'label' ? resolveLabel(e) : t === 'text' ? resolveText(e) : resolvePhoto(e)); did++; }
       catch (err) {
         if (transient(err)) break; // offline or server busy: leave queued, try again later
         e.status = 'error'; e.error = err.message || String(err); await idb.put('entries', e);
@@ -753,7 +860,7 @@ function barChart(days, target, key, cls){
   const max = Math.max(target * 1.25, ...days.map(d => d[key]), 1), bw = (W - pl) / n;
   const Y = v => H - pb - v / max * (H - pb - 6);
   let s = `<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="Daily ${key === 'cal' ? 'calories' : 'protein'}">`;
-  days.forEach((d, i) => { const y = Y(d[key]); s += `<rect x="${pl + i*bw + bw*0.15}" y="${y}" width="${Math.max(1, bw*0.7)}" height="${H - pb - y}" rx="2" class="${d[key] > target && cls === 'b-ok' ? 'b-over' : cls}"/>`; });
+  days.forEach((d, i) => { const y = Y(d[key]); s += `<rect x="${pl + i*bw + bw*0.15}" y="${y}" width="${Math.max(1, bw*0.7)}" height="${H - pb - y}" rx="2" ${cls === 'b-ok' ? `style="fill:${goalColor(d[key], target)}"` : `class="${cls}"`}/>`; });
   const ty = Y(target);
   s += `<line x1="${pl}" x2="${W}" y1="${ty}" y2="${ty}" class="tline"/><text x="0" y="${ty + 3}" class="tlab">${target}</text>`;
   s += `<text x="${pl}" y="${H - 2}" class="tlab">${shortD(days[0].d)}</text><text x="${W}" y="${H - 2}" class="tlab" text-anchor="end">${shortD(days[n-1].d)}</text>`;
@@ -781,7 +888,7 @@ async function renderTrends(){
   let wpts = ws.filter(w => w.date >= start); if (wpts.length < 2) wpts = ws.slice(-10);
   const latest = ws[ws.length - 1], change = wpts.length > 1 ? wpts[wpts.length-1].lb - wpts[0].lb : null;
   $('#tab-trends').innerHTML = `<div class="chips">${[7,30,90].map(n => `<button class="chip ${n===trendDays?'on':''}" data-act="range" data-n="${n}">${n} days</button>`).join('')}</div>
-  <div class="card"><div class="ctitle"><b>Calories</b><span>dashed line is your target</span></div>${barChart(days, S.cal, 'cal', 'b-ok')}
+  <div class="card"><div class="ctitle"><b>Calories</b><span>green = within 5% of target</span></div>${barChart(days, S.cal, 'cal', 'b-ok')}
     <div class="stats">
       <div class="stat"><small>Average per logged day</small><b>${r0(avg('cal')).toLocaleString()}<span> / ${S.cal.toLocaleString()}</span></b></div>
       <div class="stat"><small>Days logged</small><b>${logged.length}<span> of ${trendDays}</span></b></div>
@@ -803,8 +910,8 @@ function renderSettings(){
     <div class="grid4">${numF('t_cal','Calories',S.cal)}${numF('t_p','Protein (g)',S.p)}${numF('t_c','Carbs (g)',S.c)}${numF('t_f','Fat (g)',S.f)}</div>
     <p class="hint" id="t_chk"></p>
     <div class="btns"><button class="primary" id="t_save">Save targets</button></div></div>
-  <div class="card"><h2>Photo estimates</h2>
-    <p class="hint">Photos are analyzed by Claude using your own Anthropic API key. The key is stored only on this phone.</p>
+  <div class="card"><h2>AI estimates</h2>
+    <p class="hint">Photos, labels and descriptions are analyzed by Claude using your own Anthropic API key. The key is stored only on this phone.</p>
     <label>API key<input id="ai_key" type="password" autocomplete="off" value="${esc(S.apiKey)}" placeholder="sk-ant-…"></label>
     <label>Model<input id="ai_model" value="${esc(S.model)}"></label>
     <div class="btns"><button id="ai_test">Test connection</button><button class="primary" id="ai_save">Save</button></div></div>
@@ -867,11 +974,16 @@ document.addEventListener('click', ev => {
     case 'label': choosePhoto({type:'label'}); break;
     case 'scan': scanSheet(); break;
     case 'manual': manualSheet(); break;
+    case 'describe': describeSheet(); break;
     case 'usefav': useFav(d.id); break;
     case 'delfav': delFav(d.id); break;
     case 'userecent': useRecent(+d.i); break;
     case 'savemeal': saveMealSheet(d.meal); break;
     case 'range': trendDays = +d.n; renderTrends(); break;
+    case 'pickday': if (d.d <= todayStr()) { curDate = d.d; calOpen = false; calMonth = null; refresh(); } break;
+    case 'caltoggle': calOpen = !calOpen; calMonth = calOpen ? curDate.slice(0,7) + '-01' : null; refresh(); break;
+    case 'calweek': { const n = addDays(curDate, +d.n); curDate = n > todayStr() ? todayStr() : n; refresh(); break; }
+    case 'calmonth': { const [y, m] = (calMonth || curDate.slice(0,7) + '-01').split('-').map(Number); calMonth = ymd(new Date(y, m-1 + (+d.n), 1)); refresh(); break; }
   }
 });
 document.addEventListener('keydown', ev => {

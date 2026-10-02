@@ -1,9 +1,12 @@
 // Bump this when you change any app file so phones pick up the update.
-const CACHE = 'chowlog-v11';
+const CACHE = 'chowlog-v12';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // cache:'reload' skips the browser's HTTP cache so a new version never precaches stale files.
+  e.waitUntil(caches.open(CACHE)
+    .then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
@@ -23,7 +26,9 @@ self.addEventListener('fetch', e => {
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
     const hit = await cache.match(req, { ignoreSearch: true });
-    const net = fetch(req).then(r => { if (r.ok) cache.put(req, r.clone()); return r; }).catch(() => null);
+    const net = fetch(req.url, { cache: 'no-cache' })
+      .then(r => { if (r.ok) cache.put(req, r.clone()); return r; })
+      .catch(() => null);
     if (hit) { e.waitUntil(net); return hit; }
     const r = await net;
     if (r) return r;

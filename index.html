@@ -998,7 +998,17 @@ $('#nextDay').onclick = () => { if (curDate < todayStr()){ curDate = addDays(cur
   try { await navigator.storage?.persist?.(); } catch {}
   showTab('today');
   processQueue();
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator) {
+    // When a new version installs, reload once so it shows immediately instead of on the next launch.
+    const hadController = !!navigator.serviceWorker.controller; let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloading) return; reloading = true;
+      toast('Updating ChowLog…'); setTimeout(() => location.reload(), 600);
+    });
+    navigator.serviceWorker.register('sw.js', {updateViaCache:'none'}).then(reg => {
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+    }).catch(() => {});
+  }
 })();
 </script>
 </body>

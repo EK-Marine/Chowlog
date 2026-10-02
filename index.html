@@ -132,6 +132,7 @@ h3.hrow{display:flex;align-items:center;justify-content:space-between}
 .row img{background:#fff}
 .srow{display:flex;gap:8px;margin-bottom:6px}.srow input{flex:1;margin:0}
 .srow button{padding:0 16px;border-radius:var(--r-sm);border:0;background:var(--field);color:var(--headink);font-weight:600}
+.tin{display:flex;gap:6px;margin-top:4px}.tin input{flex:1;margin:0}.tin select{width:auto;margin:0}
 .pick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:4px 0 8px}
 .act.primary-act small{color:var(--headink);opacity:.7}
 
@@ -227,9 +228,32 @@ function addDays(s, n){ const [y,m,d] = s.split('-').map(Number); return ymd(new
 function dnum(s){ const [y,m,d] = s.split('-').map(Number); return Date.UTC(y, m-1, d) / 864e5; }
 function shortD(s){ const [y,m,d] = s.split('-').map(Number); return new Date(y,m-1,d).toLocaleDateString(undefined,{month:'short',day:'numeric'}); }
 const hhmm = d => String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+// Times are typed as 24-hour digits (0715, 1930) with the number keypad.
+// Time format chosen in Settings: '12' (7:15 PM) or '24' (19:15).
+function is24(){ return S.timeFmt === '24'; }
+function timeInput(id, label, t){
+  const [H, M] = t.split(':').map(Number), mm = String(M).padStart(2,'0');
+  if (is24()) return `<label>${label} (24-hr)<input id="${id}" inputmode="numeric" maxlength="5" autocomplete="off" placeholder="e.g. 1930" value="${String(H).padStart(2,'0')}${mm}"></label>`;
+  return `<label>${label}<span class="tin"><input id="${id}" inputmode="numeric" maxlength="5" autocomplete="off" placeholder="e.g. 715" value="${H % 12 || 12}:${mm}">
+    <select id="${id}_ap" aria-label="AM or PM"><option ${H < 12 ? 'selected' : ''}>AM</option><option ${H >= 12 ? 'selected' : ''}>PM</option></select></span></label>`;
+}
+// Reads a time field → 'HH:MM', '' if empty, or null if invalid. In 12-hour mode, hours over 12 are taken as 24-hour.
+function readTime(id){
+  const raw = $('#' + id).value.trim(); if (!raw) return '';
+  const t = parseTime(raw); if (!t || is24() || !$('#' + id + '_ap')) return t;
+  let [H, M] = t.split(':').map(Number); if (H > 12) return t; if (H === 0) return null;
+  H = H % 12 + ($('#' + id + '_ap').value === 'PM' ? 12 : 0);
+  return String(H).padStart(2,'0') + ':' + String(M).padStart(2,'0');
+}
+const timeHint = () => is24() ? 'Enter a time like 0715 or 1930' : 'Enter a time like 7:15';
+function parseTime(s){
+  const d = String(s || '').replace(/\D/g, ''); if (!d || d.length > 4) return null;
+  const H = d.length <= 2 ? +d : +d.slice(0, d.length - 2), M = d.length <= 2 ? 0 : +d.slice(-2);
+  return H < 24 && M < 60 ? String(H).padStart(2,'0') + ':' + String(M).padStart(2,'0') : null;
+}
 const entTime = e => e.time || hhmm(new Date(e.ts));
 function tsOf(date, time){ const [y,m,d] = date.split('-').map(Number), [H,M] = (time || '12:00').split(':').map(Number); return new Date(y, m-1, d, H, M).getTime(); }
-function fmtTime(t){ const [H,M] = t.split(':').map(Number); return new Date(2000,0,1,H,M).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}); }
+function fmtTime(t){ const [H,M] = t.split(':').map(Number); return is24() ? String(H).padStart(2,'0') + ':' + String(M).padStart(2,'0') : new Date(2000,0,1,H,M).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}); }
 const byTime = (a,b) => (tsOf(a.date, entTime(a)) - tsOf(b.date, entTime(b))) || ((a.created || a.ts) - (b.created || b.ts));
 const validDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s) && s <= todayStr();
 function totals(list){ return list.reduce((t,e) => ({cal:t.cal+num(e.cal), p:t.p+num(e.p), c:t.c+num(e.c), f:t.f+num(e.f)}), {cal:0,p:0,c:0,f:0}); }
@@ -328,7 +352,7 @@ const idb = {
 };
 
 /* ---------- settings & state ---------- */
-const DEFAULTS = {cal:2200, p:160, c:220, f:70, apiKey:'', model:'claude-sonnet-5-5'};
+const DEFAULTS = {cal:2200, p:160, c:220, f:70, apiKey:'', model:'claude-sonnet-5-5', timeFmt:'12'};
 let S = {...DEFAULTS};
 async function loadSettings(){ const r = await idb.get('kv','settings'); S = {...DEFAULTS, ...(r ? r.v : {})}; }
 const saveSettings = () => idb.put('kv', {k:'settings', v:S});
@@ -448,7 +472,7 @@ function entryRow(e){
     <div class="rc">${e.status === 'ok' ? r0(e.cal) : ''}</div></button></div>`;
 }
 async function renderToday(){
-  const es = (await idb.byDate(curDate)).sort(byTime);
+  const es = (await idb.byDate(curDate)).sort((a, b) => byTime(b, a)); // newest first within each meal
   const t = totals(es.filter(e => e.status === 'ok'));
   const left = S.cal - t.cal, filled = Math.round(Math.min(t.cal, S.cal) / S.cal * 20);
   const segs = Array.from({length:20}, (_,i) => `<i class="${left < 0 ? 'ov' : i < filled ? 'on' : ''}"></i>`).join('');
@@ -482,7 +506,7 @@ async function renderAdd(){
   recentCache = await recentItems();
   let h = `<div class="chips">${MEALS.map(m => `<button class="chip ${m===curMeal?'on':''}" data-act="meal" data-meal="${m}">${MEAL_LABEL[m]}</button>`).join('')}</div>
   <div class="when"><label>Date eaten<input type="date" id="lw_date" value="${logDate || todayStr()}" max="${todayStr()}"></label>
-    <label>Time eaten<input type="time" id="lw_time" value="${logTime || hhmm(new Date())}"></label></div>
+    ${timeInput('lw_time', 'Time eaten', logTime || hhmm(new Date()))}</div>
   ${logTime || logDate ? `<p class="when-note">Logging for ${logDate ? shortD(logDate) : 'today'} at ${fmtTime(logTime || hhmm(new Date()))}. <button class="link" id="lw_now" style="padding:0">Reset to now</button></p>` : ''}
   <div class="actions">
     <button class="act primary-act" data-act="photo"><span>◉</span>Photo<small>AI estimate</small></button>
@@ -498,7 +522,12 @@ async function renderAdd(){
   $('#lw_date').onchange = ev => { const v = ev.target.value;
     if (!v) { logDate = null; return refresh(); }
     if (validDate(v)) { logDate = v === todayStr() ? null : v; refresh(); } else { toast("Pick today or an earlier date"); ev.target.value = logDate || todayStr(); } };
-  $('#lw_time').onchange = ev => { if (!ev.target.value) { logTime = null; return refresh(); } logTime = ev.target.value; curMeal = mealForTime(logTime); refresh(); };
+  const lwChange = () => {
+    const t = readTime('lw_time'); if (t === '') { logTime = null; return refresh(); }
+    if (!t) { toast(timeHint()); return refresh(); }
+    logTime = t; curMeal = mealForTime(t); refresh(); };
+  $('#lw_time').onchange = lwChange; if ($('#lw_time_ap')) $('#lw_time_ap').onchange = lwChange;
+  $('#lw_time').onkeydown = ev => { if (ev.key === 'Enter') ev.target.blur(); };
   if ($('#lw_now')) $('#lw_now').onclick = () => { logDate = null; logTime = null; curMeal = defaultMeal(); refresh(); };
 }
 function favList(favs, editable){
@@ -723,10 +752,11 @@ function keepPendingEdits(e){
 }
 function whenFields(e){
   return `<div class="grid4"><label>Date eaten<input type="date" id="e_date" value="${e.date}" max="${todayStr()}"></label>
-    <label>Time eaten<input type="time" id="e_time" value="${entTime(e)}"></label></div>`;
+    ${timeInput('e_time', 'Time eaten', entTime(e))}</div>`;
 }
 function applyWhen(e){
-  const d = $('#e_date').value, t = $('#e_time').value || entTime(e);
+  const d = $('#e_date').value, r = readTime('e_time'), t = r === '' ? entTime(e) : r;
+  if (!t) { toast(timeHint()); return false; }
   if (!validDate(d)) { toast('Pick today or an earlier date'); return false; }
   e.date = d; e.time = t; e.ts = tsOf(d, t); return true;
 }
@@ -1156,6 +1186,11 @@ function renderSettings(){
     <label>API key<input id="ai_key" type="password" autocomplete="off" value="${esc(S.apiKey)}" placeholder="sk-ant-…"></label>
     <label>Model<input id="ai_model" value="${esc(S.model)}"></label>
     <div class="btns"><button id="ai_test">Test connection</button><button class="primary" id="ai_save">Save</button></div></div>
+  <div class="card"><h2>Time format</h2>
+    <label>Show times as<select id="tf_sel">
+      <option value="12" ${S.timeFmt !== '24' ? 'selected' : ''}>12-hour (7:15 PM)</option>
+      <option value="24" ${S.timeFmt === '24' ? 'selected' : ''}>24-hour (19:15)</option></select></label>
+    <p class="hint">Used for every time shown in the app and for typing times when you log or edit food.</p></div>
   <div class="card"><h2>Backup</h2>
     <p class="hint">Your log lives only on this phone. Export a backup now and then, and import it if you switch phones.</p>
     <div class="btns"><button id="ex_go">Export backup</button><button id="im_go">Import backup</button></div></div>
@@ -1171,6 +1206,7 @@ function renderSettings(){
     try { await callClaude('Reply with OK.', 10); await saveSettings(); toast('Connected. Key saved.'); }
     catch (e) { toast(e instanceof NetErr ? 'No connection right now' : 'Failed: ' + e.message); }
   };
+  $('#tf_sel').onchange = async ev => { S.timeFmt = ev.target.value; await saveSettings(); toast('Time format saved'); renderSettings(); };
   $('#ex_go').onclick = exportData;
   $('#im_go').onclick = () => $('#importInput').click();
   $('#wipe').onclick = async () => {

@@ -34,10 +34,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--coyote);outline-offset:2px}
 
 .top{position:sticky;top:0;z-index:5;background:var(--field);color:var(--headink);
-  padding:calc(env(safe-area-inset-top,0px) + 10px) 12px 10px;display:flex;align-items:center;gap:8px}
-.top .nav{background:none;border:0;color:var(--headink);font-size:26px;width:40px;height:40px;border-radius:50%}
-.top .nav:disabled{opacity:.3}
-#dateLabel{flex:1;text-align:center;font-weight:650;font-size:17px}
+  padding:calc(env(safe-area-inset-top,0px) + 12px) 16px 12px;display:flex;align-items:center;gap:8px}
+#dateLabel{flex:1;font-weight:700;font-size:18px}
 #netBadge{position:absolute;right:12px;bottom:-26px;font-size:12px;padding:3px 9px;border-radius:20px;background:var(--chip);color:var(--mute)}
 #netBadge.off{background:var(--signal);color:#fff}
 #netBadge:empty{display:none}
@@ -70,6 +68,7 @@ h3{font-size:15px;color:var(--mute);font-weight:600;margin:22px 4px 8px}
 .cal{padding:10px 8px 6px}
 .cal-mh{display:flex;align-items:center;justify-content:space-between;padding:0 4px 6px}
 .cal-mh b{font-size:16px}
+.cal-ttl{text-align:center;line-height:1.2}.cal-ttl small{display:block;font-size:12px;color:var(--mute)}
 .cal-nav{background:none;border:0;font-size:22px;width:40px;height:36px;border-radius:50%}
 .cal-nav:disabled{opacity:.25}
 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
@@ -93,6 +92,14 @@ h3{font-size:15px;color:var(--mute);font-weight:600;margin:22px 4px 8px}
 .when{display:grid;grid-template-columns:1fr 1fr;gap:0 10px;margin-bottom:4px}
 .when-note{font-size:13px;color:var(--signal);margin:-4px 4px 10px}
 .tab > .row{background:var(--card);border:1px solid var(--line);border-radius:var(--r-sm);margin-bottom:6px}
+.tab > .swipe{border:1px solid var(--line);border-radius:var(--r-sm);margin-bottom:6px}
+.tab > .swipe > .row{border-top:0}
+.swipe{position:relative;overflow:hidden;touch-action:pan-y}
+.swipe-bg{position:absolute;inset:0;background:var(--signal);color:#fff;display:flex;align-items:center;justify-content:flex-end;padding-right:20px;font-weight:700;opacity:.7}
+.swipe.arm .swipe-bg{opacity:1}
+.swipe > .row{position:relative;background:var(--card);user-select:none;-webkit-user-select:none}
+h3.hrow{display:flex;align-items:center;justify-content:space-between}
+.btns.sticky{position:sticky;bottom:calc(env(safe-area-inset-bottom,0px) + 70px);background:var(--paper);padding:8px 0}
 .row img,.row .ic{width:42px;height:42px;border-radius:var(--r-sm);object-fit:cover;flex:none}
 .row .ic{background:var(--chip);display:grid;place-items:center;font-size:18px;color:var(--mute)}
 .rm{flex:1;min-width:0}
@@ -169,13 +176,13 @@ label.chk input{width:auto;margin:0}
 #toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 84px);transform:translateX(-50%);z-index:30;
   background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:20px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw}
 #toast.show{opacity:1}
+#toast.act{pointer-events:auto}
+#toast button{background:none;border:0;color:var(--coyote);font-weight:700;margin-left:10px;padding:2px 4px}
 </style>
 </head>
 <body>
 <header class="top">
-  <button class="nav" id="prevDay" aria-label="Previous day">‹</button>
   <div id="dateLabel"></div>
-  <button class="nav" id="nextDay" aria-label="Next day">›</button>
   <span id="netBadge"></span>
 </header>
 <main>
@@ -282,7 +289,13 @@ function sheet(html, onClose){ $('#sheet').innerHTML = html; $('#modal').classLi
 function closeSheet(){ if (sheetClose) { const f = sheetClose; sheetClose = null; f(); } $('#modal').classList.add('hidden'); $('#sheet').innerHTML = ''; }
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeSheet(); });
 let toastT;
-function toast(msg){ const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2400); }
+function toast(msg, undo){
+  const t = $('#toast'); t.innerHTML = esc(msg) + (undo ? '<button id="t_undo">Undo</button>' : '');
+  t.classList.toggle('act', !!undo); t.classList.add('show'); clearTimeout(toastT);
+  const hide = () => t.classList.remove('show', 'act');
+  if (undo) $('#t_undo').onclick = async () => { hide(); await undo(); };
+  toastT = setTimeout(hide, undo ? 5000 : 2400);
+}
 const numF = (id, label, val) => `<label>${label}<input id="${id}" type="number" inputmode="decimal" step="any" value="${val ?? ''}"></label>`;
 
 function showTab(t){
@@ -291,14 +304,13 @@ function showTab(t){
   document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
   window.scrollTo(0,0); refresh();
 }
+function dayName(s){
+  const t = todayStr();
+  return s === t ? 'Today' : s === addDays(t,-1) ? 'Yesterday' :
+    new Date(...s.split('-').map((v,i) => i===1 ? v-1 : +v)).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
+}
 function renderDate(){
-  const t = todayStr(), viewing = curTab === 'today';
-  // The day arrows only browse the Today view; logging uses its own date/time fields.
-  $('#prevDay').style.visibility = $('#nextDay').style.visibility = viewing ? '' : 'hidden';
-  if (!viewing) { $('#dateLabel').textContent = {add:'Log food', trends:'Trends', settings:'Settings'}[curTab]; return; }
-  $('#dateLabel').textContent = curDate === t ? 'Today' : curDate === addDays(t,-1) ? 'Yesterday' :
-    new Date(...curDate.split('-').map((v,i) => i===1 ? v-1 : +v)).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
-  $('#nextDay').disabled = curDate >= t;
+  $('#dateLabel').textContent = {today:'ChowLog', add:'Log food', trends:'Trends', settings:'Settings'}[curTab];
 }
 async function updateBadge(){
   const pend = (await idb.all('entries')).filter(e => e.status !== 'ok').length;
@@ -345,7 +357,7 @@ async function calendarHTML(){
       <button class="cal-nav" data-act="calmonth" data-n="1" aria-label="Next month" ${month >= t.slice(0,7) + '-01' ? 'disabled' : ''}>›</button></div>`;
   } else {
     const a = days[0], b = days[6];
-    head = `<div class="cal-mh"><button class="cal-nav" data-act="calweek" data-n="-7" aria-label="Previous week">‹</button><b>${shortD(a)} – ${shortD(b)}</b>
+    head = `<div class="cal-mh"><button class="cal-nav" data-act="calweek" data-n="-7" aria-label="Previous week">‹</button><div class="cal-ttl"><b>${dayName(curDate)}</b><small>${shortD(a)} – ${shortD(b)}</small></div>
       <button class="cal-nav" data-act="calweek" data-n="7" aria-label="Next week" ${b >= t ? 'disabled' : ''}>›</button></div>`;
   }
   const wd = ['S','M','T','W','T','F','S'].map(x => `<div class="cal-wd">${x}</div>`).join('');
@@ -367,9 +379,9 @@ function macro(label, v, t, k){
 function entryRow(e){
   const st = e.status === 'pending' ? `<span class="tag pend">Queued for ${({photo:'analysis', label:'reading', barcode:'lookup', text:'estimate'})[e.pending?.type] || 'processing'}</span>`
            : e.status === 'error' ? `<span class="tag err">Needs attention</span>` : '';
-  return `<button class="row" data-act="entry" data-id="${e.id}">${e.thumb ? `<img src="${e.thumb}" alt="">` : `<div class="ic">${ICON[e.source]||'•'}</div>`}
+  return `<div class="swipe" data-swipe="entry" data-id="${e.id}"><div class="swipe-bg">Delete</div><button class="row" data-act="entry" data-id="${e.id}">${e.thumb ? `<img src="${e.thumb}" alt="">` : `<div class="ic">${ICON[e.source]||'•'}</div>`}
     <div class="rm"><div class="rn">${esc(e.name)}</div><div class="rd">${fmtTime(entTime(e))} · ${st || `P ${r0(e.p)} · C ${r0(e.c)} · F ${r0(e.f)}`}</div></div>
-    <div class="rc">${e.status === 'ok' ? r0(e.cal) : ''}</div></button>`;
+    <div class="rc">${e.status === 'ok' ? r0(e.cal) : ''}</div></button></div>`;
 }
 async function renderToday(){
   const es = (await idb.byDate(curDate)).sort(byTime);
@@ -400,6 +412,7 @@ async function recentItems(){
   return out;
 }
 async function renderAdd(){
+  if (builder) return renderBuilder();
   const favs = (await idb.all('favorites')).sort((a,b) => (b.used||0) - (a.used||0));
   recentCache = await recentItems();
   let h = `<div class="chips">${MEALS.map(m => `<button class="chip ${m===curMeal?'on':''}" data-act="meal" data-meal="${m}">${MEAL_LABEL[m]}</button>`).join('')}</div>
@@ -413,15 +426,8 @@ async function renderAdd(){
     <button class="act" data-act="label"><span>▥</span>Label<small>Read Nutrition Facts</small></button>
     <button class="act wide" data-act="manual"><span>✎</span>Manual entry</button>
   </div>
-  <h3>Favorites and saved meals</h3>`;
-  h += favs.length ? favs.map(f => `<div class="row" data-act="usefav" data-id="${f.id}" role="button" tabindex="0"><div class="ic">${f.items ? '▣' : '★'}</div>
-      <div class="rm"><div class="rn">${esc(f.name)}</div><div class="rd">${f.items ? f.items.length + ' items · ' : ''}P ${r0(f.p)} · C ${r0(f.c)} · F ${r0(f.f)}</div></div>
-      <div class="rc">${r0(f.cal)}</div><button class="x" data-act="delfav" data-id="${f.id}" aria-label="Delete favorite">✕</button></div>`).join('')
-    : `<div class="empty">Open any logged entry and tap “Favorite” to re-log it with one tap.</div>`;
-  h += `<h3>Recent</h3>`;
-  h += recentCache.length ? recentCache.map((e,i) => `<button class="row" data-act="userecent" data-i="${i}">${e.thumb ? `<img src="${e.thumb}" alt="">` : `<div class="ic">${ICON[e.source]||'•'}</div>`}
-      <div class="rm"><div class="rn">${esc(e.name)}</div><div class="rd">P ${r0(e.p)} · C ${r0(e.c)} · F ${r0(e.f)}</div></div><div class="rc">${r0(e.cal)}</div></button>`).join('')
-    : `<div class="empty">Foods you log will show up here.</div>`;
+  <h3 class="hrow">Favorites and saved meals <button class="mini" data-act="newmeal">+ Create meal</button></h3>`;
+  h += favList(favs, true) + recentList();
   $('#tab-add').innerHTML = h;
   $('#lw_date').onchange = ev => { const v = ev.target.value;
     if (!v) { logDate = null; return refresh(); }
@@ -429,8 +435,89 @@ async function renderAdd(){
   $('#lw_time').onchange = ev => { if (!ev.target.value) { logTime = null; return refresh(); } logTime = ev.target.value; curMeal = mealForHour(+logTime.split(':')[0]); refresh(); };
   if ($('#lw_now')) $('#lw_now').onclick = () => { logDate = null; logTime = null; curMeal = defaultMeal(); refresh(); };
 }
-const addedMsg = () => `Added to ${MEAL_LABEL[curMeal]}${logDate ? ' on ' + shortD(logDate) : ''}`;
+function favList(favs, editable){
+  return favs.length ? favs.map(f => `<div class="swipe" data-swipe="fav" data-id="${f.id}"><div class="swipe-bg">Delete</div>
+      <div class="row" data-act="usefav" data-id="${f.id}" role="button" tabindex="0"><div class="ic">${f.items ? '▣' : '★'}</div>
+      <div class="rm"><div class="rn">${esc(f.name)}</div><div class="rd">${f.items ? f.items.length + ' items · ' : ''}P ${r0(f.p)} · C ${r0(f.c)} · F ${r0(f.f)}</div></div>
+      <div class="rc">${r0(f.cal)}</div>${editable && f.items ? `<button class="x" data-act="editmeal" data-id="${f.id}" aria-label="Edit meal">✎</button>` : ''}</div></div>`).join('')
+    : `<div class="empty">Tap “+ Create meal” to build one, or open any logged entry and tap “Favorite.”</div>`;
+}
+function recentList(){
+  return `<h3>Recent</h3>` + (recentCache.length ? recentCache.map((e,i) => `<button class="row" data-act="userecent" data-i="${i}">${e.thumb ? `<img src="${e.thumb}" alt="">` : `<div class="ic">${ICON[e.source]||'•'}</div>`}
+      <div class="rm"><div class="rn">${esc(e.name)}</div><div class="rd">P ${r0(e.p)} · C ${r0(e.c)} · F ${r0(e.f)}</div></div><div class="rc">${r0(e.cal)}</div></button>`).join('')
+    : `<div class="empty">Foods you log will show up here.</div>`);
+}
+
+/* ---------- Meal builder ---------- */
+let builder = null; // {id?, name, items:[{name,cal,p,c,f}]} while creating/editing a saved meal
+const addLabel = () => builder ? 'Add to meal' : `Add to ${MEAL_LABEL[curMeal]}`;
+async function renderBuilder(){
+  const favs = (await idb.all('favorites')).sort((a,b) => (b.used||0) - (a.used||0));
+  recentCache = await recentItems();
+  const t = totals(builder.items);
+  let h = `<div class="card"><h2>${builder.id ? 'Edit meal' : 'Create a meal'}</h2>
+    <label>Meal name<input id="b_name" value="${esc(builder.name)}" placeholder="Chicken burrito bowl"></label>
+    <div class="tot">${r0(t.cal).toLocaleString()} cal · P ${r0(t.p)} · C ${r0(t.c)} · F ${r0(t.f)}</div></div>
+  <h3>Items in this meal (${builder.items.length})</h3>`;
+  h += builder.items.length ? builder.items.map((i,k) => `<div class="swipe" data-swipe="bitem" data-i="${k}"><div class="swipe-bg">Remove</div>
+      <button class="row" data-act="bitem" data-i="${k}"><div class="ic">•</div><div class="rm"><div class="rn">${esc(i.name)}</div>
+      <div class="rd">P ${r0(i.p)} · C ${r0(i.c)} · F ${r0(i.f)}</div></div><div class="rc">${r0(i.cal)}</div></button></div>`).join('')
+    : `<div class="empty">Add items with the buttons below. Swipe an item left to remove it, or tap it to adjust.</div>`;
+  h += `<div class="btns sticky"><button id="b_cancel">Cancel</button><button id="b_save">Save meal</button><button class="primary" id="b_log">Save and log</button></div>
+  <h3>Add an item</h3><div class="actions">
+    <button class="act" data-act="photo"><span>◉</span>Photo</button>
+    <button class="act" data-act="describe"><span>Aa</span>Describe</button>
+    <button class="act" data-act="scan"><span>▦</span>Barcode</button>
+    <button class="act" data-act="label"><span>▥</span>Label</button>
+    <button class="act wide" data-act="manual"><span>✎</span>Manual entry</button></div>
+  <p class="hint">Photos, labels and descriptions need a connection while you build. Favorites, recent foods and barcodes you've scanned before work offline.</p>
+  <h3>Favorites and saved meals</h3>` + favList(favs, false) + recentList();
+  $('#tab-add').innerHTML = h;
+  $('#b_name').oninput = ev => { builder.name = ev.target.value; };
+  $('#b_cancel').onclick = () => { if (builder.items.length && !confirm('Discard this meal?')) return; builder = null; refresh(); };
+  $('#b_save').onclick = () => saveBuilder(false);
+  $('#b_log').onclick = () => saveBuilder(true);
+}
+async function saveBuilder(log){
+  if (!builder.items.length) return toast('Add at least one item');
+  const t = totals(builder.items);
+  const f = {id:builder.id || uid(), name:builder.name.trim() || 'Custom meal', cal:r1(t.cal), p:r1(t.p), c:r1(t.c), f:r1(t.f),
+    items:builder.items.map(i => ({name:i.name, cal:r1(i.cal), p:r1(i.p), c:r1(i.c), f:r1(i.f)})), used:Date.now()};
+  await idb.put('favorites', f); builder = null;
+  if (log) await useFav(f.id); else { toast('Meal saved'); refresh(); }
+}
+function bItemSheet(k){
+  const i = builder.items[k]; if (!i) return;
+  sheet(`<h2>Edit item</h2><label>Name<input id="bi_name" value="${esc(i.name)}"></label>
+    <div class="grid4">${numF('bi_cal','Calories',r1(i.cal))}${numF('bi_p','Protein (g)',r1(i.p))}${numF('bi_c','Carbs (g)',r1(i.c))}${numF('bi_f','Fat (g)',r1(i.f))}</div>
+    <label>Multiply by<input id="bi_k" type="number" inputmode="decimal" step="0.25" value="1"></label>
+    <div class="btns"><button class="danger" id="bi_del">Remove</button><button class="primary" id="bi_save">Save</button></div>`);
+  $('#bi_save').onclick = () => { const v = readMacros('bi_'), m = num($('#bi_k').value) || 1;
+    builder.items[k] = {name:v.name || i.name, cal:r1(v.cal*m), p:r1(v.p*m), c:r1(v.c*m), f:r1(v.f*m)}; closeSheet(); renderAdd(); };
+  $('#bi_del').onclick = () => { builder.items.splice(k, 1); closeSheet(); renderAdd(); };
+}
+async function addToBuilder(o){
+  if (o.status === 'pending'){
+    closeSheet();
+    const t = o.pending?.type, e = {id:uid(), ...o};
+    if (t !== 'barcode' && !S.apiKey) { await idb.del('photos', e.id); return toast('Add your API key in Settings first'); }
+    toast(t === 'barcode' ? 'Looking up…' : 'Analyzing…');
+    try { await (t === 'barcode' ? resolveBarcode(e) : t === 'label' ? resolveLabel(e) : t === 'text' ? resolveText(e) : resolvePhoto(e)); }
+    catch (err) {
+      await idb.del('photos', e.id); await idb.del('entries', e.id);
+      return toast(transient(err) ? 'No connection. Use a favorite, a recent food, or manual entry.' : err.message);
+    }
+    await idb.del('entries', e.id);
+    if (e.items?.length > 1) { e.items.forEach(i => builder.items.push({name:i.name, cal:r1(i.cal), p:r1(i.p), c:r1(i.c), f:r1(i.f)})); toast(`Added ${e.items.length} items to meal`); if (curTab === 'add') renderAdd(); return; }
+    o = e;
+  }
+  builder.items.push({name:o.name, cal:r1(o.cal), p:r1(o.p), c:r1(o.c), f:r1(o.f)});
+  toast('Added to meal'); if (curTab === 'add') renderAdd();
+}
+
+const addedMsg = () => builder ? 'Added to meal' : `Added to ${MEAL_LABEL[curMeal]}${logDate ? ' on ' + shortD(logDate) : ''}`;
 async function addEntry(o){
+  if (builder) return addToBuilder(o);
   const e = {id:uid(), date:logDate || todayStr(), meal:curMeal, status:'ok', source:'manual', ...o};
   e.time = o.time || logTime || hhmm(new Date()); e.created = Date.now(); e.ts = tsOf(e.date, e.time);
   for (const k of ['cal','p','c','f']) e[k] = r1(e[k]);
@@ -457,7 +544,7 @@ function manualSheet(pre = {}){
     <div class="grid4">${numF('m_cal','Calories',pre.cal)}${numF('m_p','Protein (g)',pre.p)}${numF('m_c','Carbs (g)',pre.c)}${numF('m_f','Fat (g)',pre.f)}</div>
     ${pre.code ? `<p class="hint">These values are saved for barcode ${esc(pre.code)} as one serving, so the next scan works offline.</p>` : ''}
     <label class="chk"><input type="checkbox" id="m_fav"> Also save as a favorite</label>
-    <div class="btns">${pre.code ? '<button id="m_lbl">Scan the label instead</button>' : '<button class="ghost" data-act="close">Cancel</button>'}<button class="primary" id="m_save">Add to ${MEAL_LABEL[curMeal]}</button></div>`);
+    <div class="btns">${pre.code ? '<button id="m_lbl">Scan the label instead</button>' : '<button class="ghost" data-act="close">Cancel</button>'}<button class="primary" id="m_save">${addLabel()}</button></div>`);
   if (pre.code) $('#m_lbl').onclick = () => scanLabelFor(pre.code);
   $('#m_save').onclick = async () => {
     const v = readMacros('m_');
@@ -611,7 +698,7 @@ $('#photoInput').onchange = async ev => {
   const now = navigator.onLine && S.apiKey;
   // For a gallery photo, offer the time it was taken (unless a date/time was already chosen).
   let taken = null;
-  if (mode.gallery && !logDate && !logTime){
+  if (mode.gallery && !logDate && !logTime && !builder){
     const x = await exifDate(file);
     if (x && validDate(x.date) && Math.abs(tsOf(x.date, x.time) - Date.now()) > 30*60000) taken = x;
   }
@@ -620,14 +707,14 @@ $('#photoInput').onchange = async ev => {
     ${taken ? `<label class="chk"><input type="checkbox" id="p_when" checked> Log it when the photo was taken: ${taken.date === todayStr() ? 'today' : shortD(taken.date)}, ${fmtTime(taken.time)}</label>` : ''}
     <label>Note (optional, improves accuracy)<textarea id="p_note" placeholder="About 2 cups of rice, cooked in butter"></textarea></label>
     <p class="hint">${now ? 'It will be analyzed right away.' : 'It will be queued and analyzed automatically when you are back online' + (S.apiKey ? '.' : ', once your API key is added in Settings.')}</p>
-    <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="p_go">Add to ${MEAL_LABEL[meal()]}</button></div>`);
+    <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="p_go">${builder ? 'Add to meal' : 'Add to ' + MEAL_LABEL[meal()]}</button></div>`);
   if (taken) $('#p_when').onchange = () => { $('#p_go').textContent = `Add to ${MEAL_LABEL[meal()]}`; };
   $('#p_go').onclick = async () => {
     const id = uid(), useTaken = taken && $('#p_when').checked;
     await idb.put('photos', {id, data:full});
     await addEntry({id, name:'Photo meal', cal:0, p:0, c:0, f:0, source:'ai', thumb, status:'pending', pending:{type:'photo', note:$('#p_note').value.trim()},
       meal:meal(), ...(useTaken ? {date:taken.date, time:taken.time} : {})});
-    closeSheet(); toast(now ? 'Analyzing…' : 'Queued for analysis'); processQueue();
+    if (builder) return; closeSheet(); toast(now ? 'Analyzing…' : 'Queued for analysis'); processQueue();
   };
 };
 
@@ -674,12 +761,12 @@ function describeSheet(){
     <label>Description<textarea id="d_txt" placeholder="Wendy's Apple Pecan Chicken Salad, full size, with dressing"></textarea></label>
     <p class="hint">Include the restaurant or brand, size, and anything added or left off. Several items are fine: "2 eggs, 2 slices wheat toast with butter, black coffee."</p>
     <p class="hint">${now ? 'It will be estimated right away.' : 'It will be queued and estimated automatically when you are back online' + (S.apiKey ? '.' : ', once your API key is added in Settings.')}</p>
-    <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="d_go">Add to ${MEAL_LABEL[curMeal]}</button></div>`);
+    <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="d_go">${addLabel()}</button></div>`);
   setTimeout(() => $('#d_txt')?.focus(), 50);
   $('#d_go').onclick = async () => {
     const desc = $('#d_txt').value.trim(); if (!desc) return toast('Describe the food first');
     await addEntry({name:desc.slice(0, 80), cal:0, p:0, c:0, f:0, source:'text', status:'pending', pending:{type:'text', desc}});
-    closeSheet(); toast(now ? 'Estimating…' : 'Queued for estimate'); processQueue();
+    if (builder) return; closeSheet(); toast(now ? 'Estimating…' : 'Queued for estimate'); processQueue();
   };
 }
 const TEXT_SYS = `You estimate nutrition for foods described in text, for a calorie tracker. Split the description into its distinct items.
@@ -706,13 +793,13 @@ function labelSheet(full, thumb, code){
     ${code ? `<p class="hint">The label values will be saved to barcode ${esc(code)}, so the next scan works offline.</p>` : ''}
     <p class="hint">${now ? 'The label will be read right away.' : 'It will be queued and read automatically when you are back online' + (S.apiKey ? '.' : ', once your API key is added in Settings.')}
       The food is also saved to your favorites.</p>
-    <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="l_go">Add to ${MEAL_LABEL[curMeal]}</button></div>`);
+    <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="l_go">${addLabel()}</button></div>`);
   $('#l_go').onclick = async () => {
     const id = uid(), name = $('#l_name').value.trim();
     await idb.put('photos', {id, data:full});
     await addEntry({id, name:name || 'Nutrition label', cal:0, p:0, c:0, f:0, source:'label', thumb, status:'pending',
       pending:{type:'label', name, servings:num($('#l_sv').value) || 1, code:code || null}});
-    closeSheet(); toast(now ? 'Reading label…' : 'Queued for reading'); processQueue();
+    if (builder) return; closeSheet(); toast(now ? 'Reading label…' : 'Queued for reading'); processQueue();
   };
 }
 const LABEL_SYS = `You read Nutrition Facts panels (or other nutrition information tables) from photos. Report the values for ONE serving exactly as printed; do not estimate or adjust. If the panel shows only per-100 g values, report those and set serving_size to "100 g". If it shows both per-serving and per-container columns, use per-serving. Respond with ONLY a JSON object, no markdown:
@@ -794,7 +881,7 @@ async function handleBarcode(code){
     $('#q_lbl').onclick = () => scanLabelFor(code);
     $('#q_go').onclick = async () => {
       await addEntry({name:'Barcode ' + code, cal:0, p:0, c:0, f:0, source:'barcode', status:'pending', pending:{type:'barcode', code, servings:num($('#q_sv').value) || 1}});
-      closeSheet(); toast('Queued for lookup');
+      if (builder) return; closeSheet(); toast('Queued for lookup');
     };
     $('#q_man').onclick = () => manualSheet({code});
   }
@@ -804,7 +891,7 @@ function servingSheet(p){
   sheet(`<h2>${esc(p.name)}</h2><p class="hint">One serving (${esc(s.label)}): ${r0(s.cal)} cal, P ${r1(s.p)}, C ${r1(s.c)}, F ${r1(s.f)}</p>
     <label>Servings<input id="s_n" type="number" inputmode="decimal" step="0.25" value="1"></label>
     <div id="s_tot" class="tot"></div>
-    <div class="btns"><button id="s_edit">Edit values</button><button class="primary" id="s_add">Add to ${MEAL_LABEL[curMeal]}</button></div>`);
+    <div class="btns"><button id="s_edit">Edit values</button><button class="primary" id="s_add">${addLabel()}</button></div>`);
   const upd = () => { const n = num($('#s_n').value); $('#s_tot').textContent = `${r0(s.cal*n)} cal · P ${r0(s.p*n)} · C ${r0(s.c*n)} · F ${r0(s.f*n)}`; };
   $('#s_n').oninput = upd; upd();
   $('#s_add').onclick = async () => {
@@ -961,7 +1048,50 @@ $('#importInput').onchange = async ev => {
 };
 
 /* ---------- wiring ---------- */
+/* ---------- Swipe left to delete ---------- */
+let sw = null, swipedAt = 0;
+document.addEventListener('pointerdown', ev => {
+  const wrap = ev.target.closest('.swipe'); if (!wrap || ev.button > 0 || ev.target.closest('.x')) return;
+  sw = {wrap, row:wrap.querySelector('.row'), x0:ev.clientX, y0:ev.clientY, dx:0, active:false, pid:ev.pointerId};
+});
+document.addEventListener('pointermove', ev => {
+  if (!sw || ev.pointerId !== sw.pid) return;
+  const dx = ev.clientX - sw.x0, dy = ev.clientY - sw.y0;
+  if (!sw.active){
+    if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) { sw = null; return; } // vertical scroll wins
+    if (Math.abs(dx) < 10) return;
+    sw.active = true; sw.row.style.transition = 'none';
+  }
+  sw.dx = Math.min(0, dx); sw.row.style.transform = `translateX(${sw.dx}px)`;
+  sw.wrap.classList.toggle('arm', -sw.dx > sw.wrap.offsetWidth * 0.35);
+});
+function endSwipe(){
+  if (!sw) return; const s = sw; sw = null; if (!s.active) return;
+  swipedAt = Date.now(); const w = s.wrap.offsetWidth;
+  s.row.style.transition = 'transform .18s ease';
+  if (-s.dx > w * 0.35) { s.row.style.transform = `translateX(${-w}px)`; navigator.vibrate?.(20); setTimeout(() => swipeDelete(s.wrap), 170); }
+  else { s.row.style.transform = ''; s.wrap.classList.remove('arm'); }
+}
+document.addEventListener('pointerup', endSwipe);
+document.addEventListener('pointercancel', endSwipe);
+async function swipeDelete(wrap){
+  const kind = wrap.dataset.swipe;
+  if (kind === 'entry'){
+    const e = await idb.get('entries', wrap.dataset.id), ph = await idb.get('photos', wrap.dataset.id); if (!e) return refresh();
+    await idb.del('entries', e.id); await idb.del('photos', e.id); refresh();
+    toast(`Deleted ${e.name.slice(0, 30)}`, async () => { await idb.put('entries', e); if (ph) await idb.put('photos', ph); refresh(); });
+  } else if (kind === 'fav'){
+    const f = await idb.get('favorites', wrap.dataset.id); if (!f) return refresh();
+    await idb.del('favorites', f.id); refresh();
+    toast(`Deleted ${f.name.slice(0, 30)}`, async () => { await idb.put('favorites', f); refresh(); });
+  } else if (kind === 'bitem' && builder){
+    const k = +wrap.dataset.i, [it] = builder.items.splice(k, 1); renderAdd();
+    if (it) toast(`Removed ${it.name.slice(0, 30)}`, () => { if (builder) { builder.items.splice(k, 0, it); renderAdd(); } });
+  }
+}
+
 document.addEventListener('click', ev => {
+  if (Date.now() - swipedAt < 400) { ev.preventDefault(); return; } // a swipe isn't a tap
   const el = ev.target.closest('[data-act],[data-tab]'); if (!el) return;
   if (el.dataset.tab) return showTab(el.dataset.tab);
   const d = el.dataset;
@@ -975,6 +1105,9 @@ document.addEventListener('click', ev => {
     case 'scan': scanSheet(); break;
     case 'manual': manualSheet(); break;
     case 'describe': describeSheet(); break;
+    case 'newmeal': builder = {name:'', items:[]}; renderAdd(); window.scrollTo(0,0); break;
+    case 'editmeal': idb.get('favorites', d.id).then(f => { if (!f) return; builder = {id:f.id, name:f.name, items:f.items.map(i => ({...i}))}; renderAdd(); window.scrollTo(0,0); }); break;
+    case 'bitem': bItemSheet(+d.i); break;
     case 'usefav': useFav(d.id); break;
     case 'delfav': delFav(d.id); break;
     case 'userecent': useRecent(+d.i); break;
@@ -990,8 +1123,6 @@ document.addEventListener('keydown', ev => {
   if (ev.key === 'Escape' && !$('#modal').classList.contains('hidden')) closeSheet();
   if (ev.key === 'Enter' && ev.target.matches('[role="button"][data-act]')) ev.target.click();
 });
-$('#prevDay').onclick = () => { curDate = addDays(curDate, -1); refresh(); };
-$('#nextDay').onclick = () => { if (curDate < todayStr()){ curDate = addDays(curDate, 1); refresh(); } };
 
 (async () => {
   await loadSettings();

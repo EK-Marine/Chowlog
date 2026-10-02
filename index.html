@@ -1,0 +1,847 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2e3b2c">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>ChowLog</title>
+<style>
+:root{
+  --field:#2e3b2c; --field-2:#3d4c3a; --paper:#eceee7; --card:#fbfcf8; --ink:#1b211b; --mute:#626b61;
+  --line:#d6dad0; --coyote:#b08a52; --signal:#d4622a; --ok:#4f7a4a;
+  --kp:#3f6e9e; --kc:#b08a52; --kf:#8b5f8f; --chip:#e1e4da; --headink:#eef0ea;
+  --r-sm:8px; --r-lg:14px;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color:var(--ink); background:var(--paper);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#131712; --card:#1c211b; --ink:#e6e9e1; --mute:#98a194; --line:#2c332a; --chip:#262d24;
+    --field:#1f281e; --field-2:#2c3829;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#131712; --card:#1c211b; --ink:#e6e9e1; --mute:#98a194; --line:#2c332a; --chip:#262d24;
+  --field:#1f281e; --field-2:#2c3829;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--paper);-webkit-tap-highlight-color:transparent;font-size:16px;line-height:1.4}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--coyote);outline-offset:2px}
+
+.top{position:sticky;top:0;z-index:5;background:var(--field);color:var(--headink);
+  padding:calc(env(safe-area-inset-top,0px) + 10px) 12px 10px;display:flex;align-items:center;gap:8px}
+.top .nav{background:none;border:0;color:var(--headink);font-size:26px;width:40px;height:40px;border-radius:50%}
+.top .nav:disabled{opacity:.3}
+#dateLabel{flex:1;text-align:center;font-weight:650;font-size:17px}
+#netBadge{position:absolute;right:12px;bottom:-26px;font-size:12px;padding:3px 9px;border-radius:20px;background:var(--chip);color:var(--mute)}
+#netBadge.off{background:var(--signal);color:#fff}
+#netBadge:empty{display:none}
+
+main{padding:16px 14px calc(env(safe-area-inset-bottom,0px) + 88px);max-width:560px;margin:0 auto}
+.tab{display:none}.tab.active{display:block}
+h2{font-size:20px;margin:0 0 12px}
+h3{font-size:15px;color:var(--mute);font-weight:600;margin:22px 4px 8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px;margin-bottom:12px}
+
+/* Daily gauge — the one bold element */
+.gauge{background:var(--field);color:var(--headink);border:0;padding:18px 16px 16px}
+.gauge .num{font-size:52px;font-weight:800;letter-spacing:-1.5px;font-variant-numeric:tabular-nums;line-height:1}
+.gauge .num.over{color:#f2a37a}
+.gauge .lbl{font-size:15px;opacity:.85;margin-left:6px}
+.gauge .sub{font-size:13px;opacity:.7;margin:6px 0 14px}
+.segs{display:grid;grid-template-columns:repeat(20,1fr);gap:3px;margin-bottom:16px}
+.segs i{height:14px;border-radius:2px;background:var(--field-2)}
+.segs i.on{background:var(--coyote)}
+.segs i.ov{background:var(--signal)}
+.macros{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.mac small{display:block;font-size:12px;opacity:.75}
+.mac b{font-size:17px;font-variant-numeric:tabular-nums}
+.mac b span{font-weight:400;opacity:.65;font-size:13px}
+.mbar{height:5px;border-radius:3px;background:var(--field-2);margin-top:5px;overflow:hidden}
+.mbar i{display:block;height:100%}
+.k-p{background:#7fa9d6}.k-c{background:var(--coyote)}.k-f{background:#c39ac7}
+.mbar.over i{background:var(--signal)}
+
+.meal{padding:6px 0 4px}
+.mh{display:flex;align-items:center;gap:8px;padding:8px 14px}
+.mh b{flex:1;font-size:16px}
+.mh span{color:var(--mute);font-variant-numeric:tabular-nums;font-size:14px}
+.mini{background:var(--chip);border:0;border-radius:20px;padding:5px 12px;font-size:14px}
+.row{display:flex;align-items:center;gap:12px;padding:10px 14px;border-top:1px solid var(--line);background:none;width:100%;text-align:left}
+.when{display:grid;grid-template-columns:1fr 1fr;gap:0 10px;margin-bottom:4px}
+.when-note{font-size:13px;color:var(--signal);margin:-4px 4px 10px}
+.tab > .row{background:var(--card);border:1px solid var(--line);border-radius:var(--r-sm);margin-bottom:6px}
+.row img,.row .ic{width:42px;height:42px;border-radius:var(--r-sm);object-fit:cover;flex:none}
+.row .ic{background:var(--chip);display:grid;place-items:center;font-size:18px;color:var(--mute)}
+.rm{flex:1;min-width:0}
+.rn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:550}
+.rd{font-size:13px;color:var(--mute)}
+.rc{font-weight:700;font-variant-numeric:tabular-nums}
+.x{background:none;border:0;color:var(--mute);font-size:16px;padding:6px}
+.tag{font-size:12px;padding:2px 8px;border-radius:10px}
+.tag.pend{background:var(--chip);color:var(--mute)}
+.tag.err{background:var(--signal);color:#fff}
+.empty{color:var(--mute);font-size:14px;padding:10px 14px}
+.link{background:none;border:0;color:var(--coyote);font-size:14px;padding:8px 14px;font-weight:600}
+
+.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;margin-bottom:12px}
+.chip{border:1px solid var(--line);background:var(--card);border-radius:20px;padding:7px 14px;font-size:14px;white-space:nowrap}
+.chip.on{background:var(--field);color:var(--headink);border-color:var(--field)}
+.actions{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.act{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 6px 12px;display:flex;flex-direction:column;align-items:center;gap:2px;font-weight:650}
+.act span{font-size:26px;line-height:1.2}
+.act small{font-weight:400;color:var(--mute);font-size:12px}
+.act.primary-act{background:var(--field);color:var(--headink);border-color:var(--field)}
+.act.primary-act small{color:var(--headink);opacity:.7}
+
+.chart{width:100%;height:auto;display:block}
+.b-ok{fill:var(--coyote)}.b-over{fill:var(--signal)}.b-p{fill:var(--kp)}
+.tline{stroke:var(--ink);stroke-dasharray:4 3;stroke-width:1;opacity:.5}
+.tlab{font-size:10px;fill:var(--mute)}
+.wline{fill:none;stroke:var(--kp);stroke-width:2.5;stroke-linejoin:round}
+.wdot{fill:var(--kp)}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px}
+.stat small{display:block;color:var(--mute);font-size:12px}
+.stat b{font-size:20px;font-variant-numeric:tabular-nums}
+.stat b span{font-size:13px;font-weight:400;color:var(--mute)}
+.ctitle{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.ctitle b{font-size:16px}.ctitle span{color:var(--mute);font-size:13px}
+
+label{display:block;font-size:13px;color:var(--mute);margin-bottom:10px}
+input,select,textarea{display:block;width:100%;margin-top:4px;padding:11px 12px;border:1px solid var(--line);border-radius:var(--r-sm);
+  background:var(--paper);color:var(--ink);font:inherit;font-size:16px}
+textarea{min-height:70px;resize:vertical}
+.grid4{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}
+label.chk{display:flex;align-items:center;gap:8px;color:var(--ink);font-size:15px}
+label.chk input{width:auto;margin:0}
+.btns{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.btns button{flex:1;min-width:90px;padding:12px;border-radius:var(--r-sm);border:1px solid var(--line);background:var(--card);font-weight:600}
+.btns .primary{background:var(--field);color:var(--headink);border-color:var(--field)}
+.btns .danger{color:var(--signal)}
+.hint{font-size:13px;color:var(--mute);margin:6px 0 10px}
+.errbox{background:var(--signal);color:#fff;padding:10px;border-radius:var(--r-sm);font-size:14px}
+.prev{width:100%;max-height:220px;object-fit:cover;border-radius:var(--r-sm);margin-bottom:10px}
+.items{border:1px solid var(--line);border-radius:var(--r-sm);padding:6px 10px;margin-bottom:12px}
+.irow{display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:14px;border-bottom:1px solid var(--line)}
+.irow:last-of-type{border-bottom:0}
+.tot{font-weight:650;margin:4px 0}
+.cam{position:relative;border-radius:var(--r-sm);overflow:hidden;background:#000;margin-bottom:12px;aspect-ratio:4/3}
+.cam video{width:100%;height:100%;object-fit:cover;display:block}
+.reticle{position:absolute;left:12%;right:12%;top:38%;bottom:38%;border:2px solid var(--coyote);border-radius:6px}
+
+.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:5;background:var(--card);border-top:1px solid var(--line);
+  display:grid;grid-template-columns:repeat(4,1fr);padding:6px 4px calc(env(safe-area-inset-bottom,0px) + 6px)}
+.tabbar button{background:none;border:0;padding:6px 0;font-size:12px;color:var(--mute);display:flex;flex-direction:column;align-items:center;gap:2px}
+.tabbar button span{font-size:20px;line-height:1}
+.tabbar button.on{color:var(--ink);font-weight:650}
+
+.modal{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.45);display:flex;align-items:flex-end;justify-content:center}
+.modal.hidden{display:none}
+.sheet{background:var(--card);width:100%;max-width:560px;max-height:92vh;overflow-y:auto;border-radius:18px 18px 0 0;
+  padding:18px 16px calc(env(safe-area-inset-bottom,0px) + 18px);animation:up .18s ease-out}
+@keyframes up{from{transform:translateY(30px);opacity:.6}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.sheet{animation:none}}
+#toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 84px);transform:translateX(-50%);z-index:30;
+  background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:20px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<header class="top">
+  <button class="nav" id="prevDay" aria-label="Previous day">‹</button>
+  <div id="dateLabel"></div>
+  <button class="nav" id="nextDay" aria-label="Next day">›</button>
+  <span id="netBadge"></span>
+</header>
+<main>
+  <section id="tab-today" class="tab active"></section>
+  <section id="tab-add" class="tab"></section>
+  <section id="tab-trends" class="tab"></section>
+  <section id="tab-settings" class="tab"></section>
+</main>
+<nav class="tabbar">
+  <button data-tab="today" class="on"><span>◐</span>Today</button>
+  <button data-tab="add"><span>＋</span>Log food</button>
+  <button data-tab="trends"><span>▤</span>Trends</button>
+  <button data-tab="settings"><span>⚙</span>Settings</button>
+</nav>
+<div id="modal" class="modal hidden"><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
+<div id="toast" role="status"></div>
+<input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
+<input type="file" id="importInput" accept="application/json,.json" hidden>
+
+<script>
+'use strict';
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const num = x => { const n = parseFloat(x); return isFinite(n) ? n : 0; };
+const r0 = n => Math.round(num(n));
+const r1 = n => Math.round(num(n) * 10) / 10;
+function ymd(d){ const z = n => String(n).padStart(2,'0'); return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate()); }
+const todayStr = () => ymd(new Date());
+function addDays(s, n){ const [y,m,d] = s.split('-').map(Number); return ymd(new Date(y, m-1, d+n)); }
+function dnum(s){ const [y,m,d] = s.split('-').map(Number); return Date.UTC(y, m-1, d) / 864e5; }
+function shortD(s){ const [y,m,d] = s.split('-').map(Number); return new Date(y,m-1,d).toLocaleDateString(undefined,{month:'short',day:'numeric'}); }
+const hhmm = d => String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+const entTime = e => e.time || hhmm(new Date(e.ts));
+function tsOf(date, time){ const [y,m,d] = date.split('-').map(Number), [H,M] = (time || '12:00').split(':').map(Number); return new Date(y, m-1, d, H, M).getTime(); }
+function fmtTime(t){ const [H,M] = t.split(':').map(Number); return new Date(2000,0,1,H,M).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}); }
+const byTime = (a,b) => (tsOf(a.date, entTime(a)) - tsOf(b.date, entTime(b))) || ((a.created || a.ts) - (b.created || b.ts));
+const validDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s) && s <= todayStr();
+function totals(list){ return list.reduce((t,e) => ({cal:t.cal+num(e.cal), p:t.p+num(e.p), c:t.c+num(e.c), f:t.f+num(e.f)}), {cal:0,p:0,c:0,f:0}); }
+
+class NetErr extends Error {}
+class HttpErr extends Error { constructor(status, msg){ super(msg); this.status = status; } }
+const transient = e => e instanceof NetErr || (e instanceof HttpErr && (e.status === 429 || e.status >= 500));
+async function netFetch(url, opts){ try { return await fetch(url, opts); } catch { throw new NetErr('No connection'); } }
+
+/* ---------- IndexedDB ---------- */
+let dbp;
+function db(){
+  if (!dbp) dbp = new Promise((res, rej) => {
+    const r = indexedDB.open('chowlog', 1);
+    r.onupgradeneeded = () => {
+      const d = r.result;
+      const e = d.createObjectStore('entries', {keyPath:'id'}); e.createIndex('date','date');
+      d.createObjectStore('favorites', {keyPath:'id'});
+      d.createObjectStore('products', {keyPath:'code'});
+      d.createObjectStore('weights', {keyPath:'date'});
+      d.createObjectStore('photos', {keyPath:'id'});
+      d.createObjectStore('kv', {keyPath:'k'});
+    };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  return dbp;
+}
+async function tx(store, mode, fn){
+  const d = await db();
+  return new Promise((res, rej) => {
+    const t = d.transaction(store, mode); let out;
+    const r = fn(t.objectStore(store));
+    if (r) r.onsuccess = () => { out = r.result; };
+    t.oncomplete = () => res(out); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error);
+  });
+}
+const idb = {
+  get: (s,k) => tx(s,'readonly', st => st.get(k)),
+  put: (s,v) => tx(s,'readwrite', st => st.put(v)),
+  del: (s,k) => tx(s,'readwrite', st => st.delete(k)),
+  all: s => tx(s,'readonly', st => st.getAll()),
+  byDate: d => tx('entries','readonly', st => st.index('date').getAll(d)),
+  dateRange: (lo,hi) => tx('entries','readonly', st => st.index('date').getAll(IDBKeyRange.bound(lo,hi))),
+  replace: (s,arr) => tx(s,'readwrite', st => { st.clear(); (arr||[]).forEach(x => st.put(x)); }),
+};
+
+/* ---------- settings & state ---------- */
+const DEFAULTS = {cal:2200, p:160, c:220, f:70, apiKey:'', model:'claude-sonnet-5-5'};
+let S = {...DEFAULTS};
+async function loadSettings(){ const r = await idb.get('kv','settings'); S = {...DEFAULTS, ...(r ? r.v : {})}; }
+const saveSettings = () => idb.put('kv', {k:'settings', v:S});
+
+const MEALS = ['breakfast','lunch','dinner','snack'];
+const MEAL_LABEL = {breakfast:'Breakfast', lunch:'Lunch', dinner:'Dinner', snack:'Snacks'};
+const ICON = {manual:'✎', barcode:'▦', ai:'◉', fav:'★', label:'▥'};
+function mealForHour(h){ return h < 10 ? 'breakfast' : h < 14 ? 'lunch' : h < 17 ? 'snack' : h < 21 ? 'dinner' : 'snack'; }
+function defaultMeal(){ const h = new Date().getHours(); return h < 10 ? 'breakfast' : h < 14 ? 'lunch' : h < 17 ? 'snack' : h < 21 ? 'dinner' : 'snack'; }
+let curDate = todayStr(), lastToday = curDate, curTab = 'today', curMeal = defaultMeal(), trendDays = 7, recentCache = [];
+let logTime = null, logDate = null; // null = use the current date/time at the moment you log
+
+/* ---------- UI plumbing ---------- */
+let sheetClose = null;
+function sheet(html, onClose){ $('#sheet').innerHTML = html; $('#modal').classList.remove('hidden'); sheetClose = onClose || null; }
+function closeSheet(){ if (sheetClose) { const f = sheetClose; sheetClose = null; f(); } $('#modal').classList.add('hidden'); $('#sheet').innerHTML = ''; }
+$('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeSheet(); });
+let toastT;
+function toast(msg){ const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2400); }
+const numF = (id, label, val) => `<label>${label}<input id="${id}" type="number" inputmode="decimal" step="any" value="${val ?? ''}"></label>`;
+
+function showTab(t){
+  curTab = t;
+  document.querySelectorAll('.tab').forEach(s => s.classList.toggle('active', s.id === 'tab-'+t));
+  document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  window.scrollTo(0,0); refresh();
+}
+function renderDate(){
+  const t = todayStr(), viewing = curTab === 'today';
+  // The day arrows only browse the Today view; logging uses its own date/time fields.
+  $('#prevDay').style.visibility = $('#nextDay').style.visibility = viewing ? '' : 'hidden';
+  if (!viewing) { $('#dateLabel').textContent = {add:'Log food', trends:'Trends', settings:'Settings'}[curTab]; return; }
+  $('#dateLabel').textContent = curDate === t ? 'Today' : curDate === addDays(t,-1) ? 'Yesterday' :
+    new Date(...curDate.split('-').map((v,i) => i===1 ? v-1 : +v)).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
+  $('#nextDay').disabled = curDate >= t;
+}
+async function updateBadge(){
+  const pend = (await idb.all('entries')).filter(e => e.status !== 'ok').length;
+  const b = $('#netBadge'); const off = !navigator.onLine;
+  b.classList.toggle('off', off);
+  b.textContent = off ? `Offline${pend ? ' · ' + pend + ' queued' : ''}` : pend ? `${pend} queued` : '';
+}
+async function refresh(){
+  renderDate();
+  if (curTab === 'today') await renderToday();
+  else if (curTab === 'add') await renderAdd();
+  else if (curTab === 'trends') await renderTrends();
+  else renderSettings();
+  updateBadge();
+}
+
+/* ---------- Today ---------- */
+function macro(label, v, t, k){
+  const pct = t ? Math.min(100, v/t*100) : 0;
+  return `<div class="mac"><small>${label}</small><b>${r0(v)}<span> / ${t}g</span></b><div class="mbar ${v>t?'over':''}"><i class="k-${k}" style="width:${pct}%"></i></div></div>`;
+}
+function entryRow(e){
+  const st = e.status === 'pending' ? `<span class="tag pend">Queued for ${({photo:'analysis', label:'reading', barcode:'lookup'})[e.pending?.type] || 'processing'}</span>`
+           : e.status === 'error' ? `<span class="tag err">Needs attention</span>` : '';
+  return `<button class="row" data-act="entry" data-id="${e.id}">${e.thumb ? `<img src="${e.thumb}" alt="">` : `<div class="ic">${ICON[e.source]||'•'}</div>`}
+    <div class="rm"><div class="rn">${esc(e.name)}</div><div class="rd">${fmtTime(entTime(e))} · ${st || `P ${r0(e.p)} · C ${r0(e.c)} · F ${r0(e.f)}`}</div></div>
+    <div class="rc">${e.status === 'ok' ? r0(e.cal) : ''}</div></button>`;
+}
+async function renderToday(){
+  const es = (await idb.byDate(curDate)).sort(byTime);
+  const t = totals(es.filter(e => e.status === 'ok'));
+  const left = S.cal - t.cal, filled = Math.round(Math.min(t.cal, S.cal) / S.cal * 20);
+  const segs = Array.from({length:20}, (_,i) => `<i class="${left < 0 ? 'ov' : i < filled ? 'on' : ''}"></i>`).join('');
+  let h = `<div class="card gauge">
+    <div><span class="num ${left<0?'over':''}">${Math.abs(r0(left)).toLocaleString()}</span><span class="lbl">${left < 0 ? 'calories over' : 'calories left'}</span></div>
+    <div class="sub">${r0(t.cal).toLocaleString()} eaten of ${S.cal.toLocaleString()}</div>
+    <div class="segs">${segs}</div>
+    <div class="macros">${macro('Protein',t.p,S.p,'p')}${macro('Carbs',t.c,S.c,'c')}${macro('Fat',t.f,S.f,'f')}</div>
+  </div>`;
+  for (const m of MEALS){
+    const list = es.filter(e => e.meal === m), mt = totals(list.filter(e => e.status === 'ok'));
+    h += `<div class="card meal"><div class="mh"><b>${MEAL_LABEL[m]}</b><span>${r0(mt.cal)} cal</span><button class="mini" data-act="addto" data-meal="${m}">Add</button></div>`;
+    h += list.length ? list.map(entryRow).join('') : `<div class="empty">Nothing logged yet.</div>`;
+    if (list.filter(e => e.status === 'ok').length > 1) h += `<button class="link" data-act="savemeal" data-meal="${m}">Save as a meal</button>`;
+    h += `</div>`;
+  }
+  $('#tab-today').innerHTML = h;
+}
+
+/* ---------- Log food ---------- */
+async function recentItems(){
+  const all = (await idb.all('entries')).filter(e => e.status === 'ok').sort((a,b) => (b.created || b.ts) - (a.created || a.ts));
+  const seen = new Set(), out = [];
+  for (const e of all){ const k = e.name.toLowerCase(); if (seen.has(k)) continue; seen.add(k); out.push(e); if (out.length >= 15) break; }
+  return out;
+}
+async function renderAdd(){
+  const favs = (await idb.all('favorites')).sort((a,b) => (b.used||0) - (a.used||0));
+  recentCache = await recentItems();
+  let h = `<div class="chips">${MEALS.map(m => `<button class="chip ${m===curMeal?'on':''}" data-act="meal" data-meal="${m}">${MEAL_LABEL[m]}</button>`).join('')}</div>
+  <div class="when"><label>Date eaten<input type="date" id="lw_date" value="${logDate || todayStr()}" max="${todayStr()}"></label>
+    <label>Time eaten<input type="time" id="lw_time" value="${logTime || hhmm(new Date())}"></label></div>
+  ${logTime || logDate ? `<p class="when-note">Logging for ${logDate ? shortD(logDate) : 'today'} at ${fmtTime(logTime || hhmm(new Date()))}. <button class="link" id="lw_now" style="padding:0">Reset to now</button></p>` : ''}
+  <div class="actions">
+    <button class="act primary-act" data-act="photo"><span>◉</span>Photo<small>AI estimate</small></button>
+    <button class="act" data-act="scan"><span>▦</span>Barcode<small>Scan or type</small></button>
+    <button class="act" data-act="label"><span>▥</span>Label<small>Read Nutrition Facts</small></button>
+    <button class="act" data-act="manual"><span>✎</span>Manual<small>Enter values</small></button>
+  </div>
+  <h3>Favorites and saved meals</h3>`;
+  h += favs.length ? favs.map(f => `<div class="row" data-act="usefav" data-id="${f.id}" role="button" tabindex="0"><div class="ic">${f.items ? '▣' : '★'}</div>
+      <div class="rm"><div class="rn">${esc(f.name)}</div><div class="rd">${f.items ? f.items.length + ' items · ' : ''}P ${r0(f.p)} · C ${r0(f.c)} · F ${r0(f.f)}</div></div>
+      <div class="rc">${r0(f.cal)}</div><button class="x" data-act="delfav" data-id="${f.id}" aria-label="Delete favorite">✕</button></div>`).join('')
+    : `<div class="empty">Open any logged entry and tap “Favorite” to re-log it with one tap.</div>`;
+  h += `<h3>Recent</h3>`;
+  h += recentCache.length ? recentCache.map((e,i) => `<button class="row" data-act="userecent" data-i="${i}">${e.thumb ? `<img src="${e.thumb}" alt="">` : `<div class="ic">${ICON[e.source]||'•'}</div>`}
+      <div class="rm"><div class="rn">${esc(e.name)}</div><div class="rd">P ${r0(e.p)} · C ${r0(e.c)} · F ${r0(e.f)}</div></div><div class="rc">${r0(e.cal)}</div></button>`).join('')
+    : `<div class="empty">Foods you log will show up here.</div>`;
+  $('#tab-add').innerHTML = h;
+  $('#lw_date').onchange = ev => { const v = ev.target.value;
+    if (!v) { logDate = null; return refresh(); }
+    if (validDate(v)) { logDate = v === todayStr() ? null : v; refresh(); } else { toast("Pick today or an earlier date"); ev.target.value = logDate || todayStr(); } };
+  $('#lw_time').onchange = ev => { if (!ev.target.value) { logTime = null; return refresh(); } logTime = ev.target.value; curMeal = mealForHour(+logTime.split(':')[0]); refresh(); };
+  if ($('#lw_now')) $('#lw_now').onclick = () => { logDate = null; logTime = null; curMeal = defaultMeal(); refresh(); };
+}
+const addedMsg = () => `Added to ${MEAL_LABEL[curMeal]}${logDate ? ' on ' + shortD(logDate) : ''}`;
+async function addEntry(o){
+  const e = {id:uid(), date:logDate || todayStr(), meal:curMeal, status:'ok', source:'manual', ...o};
+  e.time = o.time || logTime || hhmm(new Date()); e.created = Date.now(); e.ts = tsOf(e.date, e.time);
+  for (const k of ['cal','p','c','f']) e[k] = r1(e[k]);
+  await idb.put('entries', e); refresh(); return e;
+}
+async function useFav(id){
+  const f = await idb.get('favorites', id); if (!f) return;
+  if (f.items) for (const i of f.items) await addEntry({name:i.name, cal:i.cal, p:i.p, c:i.c, f:i.f, source:'fav'});
+  else await addEntry({name:f.name, cal:f.cal, p:f.p, c:f.c, f:f.f, source:'fav'});
+  f.used = Date.now(); await idb.put('favorites', f);
+  toast(addedMsg());
+}
+async function useRecent(i){
+  const e = recentCache[i]; if (!e) return;
+  await addEntry({name:e.name, cal:e.cal, p:e.p, c:e.c, f:e.f, source:e.source, thumb:e.thumb, items:e.items});
+  toast(addedMsg());
+}
+async function delFav(id){ if (!confirm('Delete this favorite?')) return; await idb.del('favorites', id); refresh(); }
+function readMacros(p){ return {name:$('#'+p+'name').value.trim(), cal:num($('#'+p+'cal').value), p:num($('#'+p+'p').value), c:num($('#'+p+'c').value), f:num($('#'+p+'f').value)}; }
+
+function manualSheet(pre = {}){
+  sheet(`<h2>${esc(pre.title || 'Manual entry')}</h2>
+    <label>Name<input id="m_name" value="${esc(pre.name || '')}" placeholder="Grilled chicken, 6 oz"></label>
+    <div class="grid4">${numF('m_cal','Calories',pre.cal)}${numF('m_p','Protein (g)',pre.p)}${numF('m_c','Carbs (g)',pre.c)}${numF('m_f','Fat (g)',pre.f)}</div>
+    ${pre.code ? `<p class="hint">These values are saved for barcode ${esc(pre.code)} as one serving, so the next scan works offline.</p>` : ''}
+    <label class="chk"><input type="checkbox" id="m_fav"> Also save as a favorite</label>
+    <div class="btns">${pre.code ? '<button id="m_lbl">Scan the label instead</button>' : '<button class="ghost" data-act="close">Cancel</button>'}<button class="primary" id="m_save">Add to ${MEAL_LABEL[curMeal]}</button></div>`);
+  if (pre.code) $('#m_lbl').onclick = () => scanLabelFor(pre.code);
+  $('#m_save').onclick = async () => {
+    const v = readMacros('m_');
+    if (!v.name) return toast('Add a name first');
+    await addEntry({...v, source: pre.code ? 'barcode' : 'manual'});
+    if (pre.code) await idb.put('products', {code:pre.code, name:v.name, serving:{label:'1 serving', cal:v.cal, p:v.p, c:v.c, f:v.f}, ts:Date.now()});
+    if ($('#m_fav').checked) await idb.put('favorites', {id:uid(), ...v, used:Date.now()});
+    closeSheet(); toast(addedMsg());
+  };
+}
+
+async function entrySheet(id){
+  const e = await idb.get('entries', id); if (!e) return;
+  let h = `<h2>${e.status === 'ok' ? 'Edit entry' : 'Queued entry'}</h2>`;
+  if (e.thumb) h += `<img class="prev" src="${e.thumb}" alt="">`;
+  if (e.status !== 'ok'){
+    if (e.status === 'error') h += `<p class="errbox">${esc(e.error)}</p>`;
+    const pt = e.pending?.type, keyNote = S.apiKey ? '.' : ' and an API key is set in Settings.';
+    h += `<p class="hint">${pt === 'photo' ? 'This photo is analyzed automatically once you have a connection' + keyNote
+        : pt === 'label' ? 'This label is read automatically once you have a connection' + keyNote
+        : 'Barcode ' + esc(e.pending?.code) + ' is looked up automatically once you have a connection.'}</p>`;
+    h += whenFields(e);
+    if (e.pending?.type === 'photo') h += `<label>Note for the estimate<textarea id="e_note" placeholder="Portion size, brand, cooking oil…">${esc(e.pending.note || '')}</textarea></label>`;
+    h += `<div class="btns"><button class="danger" id="e_del">Delete</button><button id="e_man">Enter manually</button><button id="e_keep">Save</button><button class="primary" id="e_retry">Try now</button></div>`;
+    sheet(h);
+    $('#e_keep').onclick = async () => { if (!applyWhen(e)) return; if (e.pending?.type === 'photo') e.pending.note = $('#e_note').value.trim(); await idb.put('entries', e); closeSheet(); toast('Saved'); refresh(); };
+    $('#e_retry').onclick = async () => {
+      if (!applyWhen(e)) return;
+      if (e.pending?.type === 'photo') e.pending.note = $('#e_note').value.trim();
+      e.status = 'pending'; e.error = null; await idb.put('entries', e); closeSheet();
+      if (!navigator.onLine) toast('Still offline. It will run automatically when you reconnect.');
+      else if (e.pending?.type !== 'barcode' && !S.apiKey) toast('Add your API key in Settings first');
+      else toast('Working on it…');
+      processQueue(true);
+    };
+    $('#e_man').onclick = async () => {
+      if (!applyWhen(e)) return;
+      e.status = 'ok'; e.pending = null; e.error = null; e.source = 'manual';
+      if (/^(Photo meal|Barcode |Nutrition label)/.test(e.name)) e.name = '';
+      await idb.put('entries', e); await idb.del('photos', e.id); entrySheet(e.id);
+    };
+  } else {
+    if (e.items?.length) h += `<div class="items">${e.items.map(i => `<div class="irow"><span>${esc(i.name)}${i.portion ? ` <small>(${esc(i.portion)})</small>` : ''}</span><span>${r0(i.cal)}</span></div>`).join('')}
+      ${e.source === 'label' ? `<p class="hint">Read from the nutrition label. One serving is ${esc(e.serving || 'as printed')}.</p>`
+        : e.ai ? `<p class="hint">AI estimate, ${esc(e.ai.confidence || 'unknown')} confidence.${e.ai.notes ? ' ' + esc(e.ai.notes) : ''}</p>` : ''}</div>`;
+    h += `<label>Name<input id="e_name" value="${esc(e.name)}"></label>
+      <div class="grid4">${numF('e_cal','Calories',e.cal)}${numF('e_p','Protein (g)',e.p)}${numF('e_c','Carbs (g)',e.c)}${numF('e_f','Fat (g)',e.f)}</div>
+      <div class="grid4"><label>Meal<select id="e_meal">${MEALS.map(m => `<option value="${m}" ${m===e.meal?'selected':''}>${MEAL_LABEL[m]}</option>`).join('')}</select></label>
+      <label>Multiply by<input id="e_scale" type="number" inputmode="decimal" step="0.25" value="1"></label></div>
+      ${whenFields(e)}
+      <p class="hint">Use “Multiply by” for portions: 0.5 if you ate half, 2 for a double.</p>
+      <div class="btns"><button class="danger" id="e_del">Delete</button><button id="e_fav">Favorite</button>${e.date !== todayStr() ? '<button id="e_copy">Log today</button>' : ''}<button class="primary" id="e_save">Save</button></div>`;
+    sheet(h);
+    const read = () => { const v = readMacros('e_'), k = num($('#e_scale').value) || 1; return {...v, cal:v.cal*k, p:v.p*k, c:v.c*k, f:v.f*k}; };
+    $('#e_save').onclick = async () => {
+      const v = read(); if (!v.name) return toast('Add a name first');
+      const oldDate = e.date; if (!applyWhen(e)) return;
+      Object.assign(e, v, {meal:$('#e_meal').value}); for (const k of ['cal','p','c','f']) e[k] = r1(e[k]);
+      await idb.put('entries', e); closeSheet(); toast(e.date !== oldDate ? `Moved to ${shortD(e.date)}` : 'Saved'); refresh();
+    };
+    $('#e_fav').onclick = async () => { const v = read(); await idb.put('favorites', {id:uid(), name:v.name || 'Favorite', cal:r1(v.cal), p:r1(v.p), c:r1(v.c), f:r1(v.f), used:Date.now()}); toast('Saved to favorites'); };
+    if ($('#e_copy')) $('#e_copy').onclick = async () => {
+      const v = read();
+      await addEntry({name:v.name, cal:v.cal, p:v.p, c:v.c, f:v.f, source:e.source, thumb:e.thumb, items:e.items, meal:$('#e_meal').value, date:todayStr(), time:hhmm(new Date())});
+      closeSheet(); toast('Logged today'); refresh();
+    };
+  }
+  $('#e_del').onclick = async () => { await idb.del('entries', e.id); await idb.del('photos', e.id); closeSheet(); toast('Deleted'); refresh(); };
+}
+
+function whenFields(e){
+  return `<div class="grid4"><label>Date eaten<input type="date" id="e_date" value="${e.date}" max="${todayStr()}"></label>
+    <label>Time eaten<input type="time" id="e_time" value="${entTime(e)}"></label></div>`;
+}
+function applyWhen(e){
+  const d = $('#e_date').value, t = $('#e_time').value || entTime(e);
+  if (!validDate(d)) { toast('Pick today or an earlier date'); return false; }
+  e.date = d; e.time = t; e.ts = tsOf(d, t); return true;
+}
+async function saveMealSheet(m){
+  const list = (await idb.byDate(curDate)).filter(e => e.meal === m && e.status === 'ok');
+  sheet(`<h2>Save as a meal</h2><label>Name<input id="sm_n" value="Usual ${MEAL_LABEL[m].toLowerCase()}"></label>
+    <p class="hint">${list.length} items, ${r0(totals(list).cal)} calories. Logging it later adds every item at once.</p>
+    <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="sm_go">Save meal</button></div>`);
+  $('#sm_go').onclick = async () => {
+    const t = totals(list);
+    await idb.put('favorites', {id:uid(), name:$('#sm_n').value.trim() || 'Saved meal', cal:r1(t.cal), p:r1(t.p), c:r1(t.c), f:r1(t.f),
+      items:list.map(e => ({name:e.name, cal:e.cal, p:e.p, c:e.c, f:e.f})), used:Date.now()});
+    closeSheet(); toast('Meal saved');
+  };
+}
+
+/* ---------- Photo (AI) ---------- */
+function loadImg(file){ return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); }); }
+function toJpeg(img, max, q){
+  const s = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+  const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth*s); c.height = Math.round(img.naturalHeight*s);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', q);
+}
+let photoMode = {type:'meal'};
+function scanLabelFor(code){ closeSheet(); photoMode = {type:'label', code}; $('#photoInput').click(); }
+$('#photoInput').onchange = async ev => {
+  const file = ev.target.files[0]; ev.target.value = ''; if (!file) return;
+  const mode = photoMode; photoMode = {type:'meal'};
+  let full, thumb;
+  // Labels need more pixels so the small print stays legible.
+  try { const img = await loadImg(file); full = toJpeg(img, mode.type === 'label' ? 1600 : 1024, mode.type === 'label' ? 0.88 : 0.8); thumb = toJpeg(img, 160, 0.7); URL.revokeObjectURL(img.src); }
+  catch { return toast('That photo could not be read. Try again.'); }
+  if (mode.type === 'label') return labelSheet(full, thumb, mode.code);
+  const now = navigator.onLine && S.apiKey;
+  sheet(`<h2>Log a photo</h2><img class="prev" src="${thumb}" alt="">
+    <label>Note (optional, improves accuracy)<textarea id="p_note" placeholder="About 2 cups of rice, cooked in butter"></textarea></label>
+    <p class="hint">${now ? 'It will be analyzed right away.' : 'It will be queued and analyzed automatically when you are back online' + (S.apiKey ? '.' : ', once your API key is added in Settings.')}</p>
+    <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="p_go">Add to ${MEAL_LABEL[curMeal]}</button></div>`);
+  $('#p_go').onclick = async () => {
+    const id = uid();
+    await idb.put('photos', {id, data:full});
+    await addEntry({id, name:'Photo meal', cal:0, p:0, c:0, f:0, source:'ai', thumb, status:'pending', pending:{type:'photo', note:$('#p_note').value.trim()}});
+    closeSheet(); toast(now ? 'Analyzing…' : 'Queued for analysis'); processQueue();
+  };
+};
+
+const SYS = `You estimate nutrition from meal photos for a calorie tracker. Identify each distinct food or drink, estimate its portion, and estimate calories and macronutrients. Use the user's note when given; it overrides what you see. Respond with ONLY a JSON object, no markdown, in this shape:
+{"meal_name":"short name for the whole meal","items":[{"name":"food","portion":"e.g. 1 cup","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0}],"confidence":"low|medium|high","notes":"one short sentence on assumptions"}
+If no food is visible, return an empty items array.`;
+
+async function callClaude(content, max = 1500, system){
+  const r = await netFetch('https://api.anthropic.com/v1/messages', {method:'POST',
+    headers:{'content-type':'application/json','x-api-key':S.apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify({model:S.model, max_tokens:max, ...(system ? {system} : {}), messages:[{role:'user', content}]})});
+  if (!r.ok){ let m = ''; try { m = (await r.json()).error?.message || ''; } catch {} throw new HttpErr(r.status, m || 'API error ' + r.status); }
+  const j = await r.json();
+  return (j.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+}
+function parseJSON(t){ const s = t.indexOf('{'), e = t.lastIndexOf('}'); if (s < 0 || e < s) throw new Error('The estimate came back in an unreadable format. Tap Try now.'); return JSON.parse(t.slice(s, e+1)); }
+
+async function resolvePhoto(e){
+  const ph = await idb.get('photos', e.id);
+  if (!ph) throw new Error('The original photo is missing. Enter this one manually.');
+  const note = e.pending.note ? ` Note from the user: ${e.pending.note}` : '';
+  const txt = await callClaude([
+    {type:'image', source:{type:'base64', media_type:'image/jpeg', data:ph.data.split(',')[1]}},
+    {type:'text', text:'Estimate the nutrition for this meal.' + note}], 1500, SYS);
+  const d = parseJSON(txt);
+  const items = (d.items || []).map(i => ({name:String(i.name || 'Item'), portion:i.portion ? String(i.portion) : '',
+    cal:r1(i.calories), p:r1(i.protein_g), c:r1(i.carbs_g), f:r1(i.fat_g)}));
+  if (!items.length) throw new Error('No food was recognized in this photo. Add a note or enter it manually.');
+  const t = totals(items);
+  Object.assign(e, {name:String(d.meal_name || items.map(i => i.name).join(', ')).slice(0, 80), cal:r1(t.cal), p:r1(t.p), c:r1(t.c), f:r1(t.f),
+    items, ai:{confidence:d.confidence, notes:d.notes}, note:e.pending.note, status:'ok', pending:null, error:null});
+  await idb.put('entries', e); await idb.del('photos', e.id);
+}
+
+/* ---------- Nutrition label ---------- */
+function labelSheet(full, thumb, code){
+  const now = navigator.onLine && S.apiKey;
+  sheet(`<h2>Log from a label</h2><img class="prev" src="${thumb}" alt="">
+    <label>Food name<input id="l_name" placeholder="Leave blank to use the name on the package"></label>
+    <label>Servings you ate<input id="l_sv" type="number" inputmode="decimal" step="0.25" value="1"></label>
+    ${code ? `<p class="hint">The label values will be saved to barcode ${esc(code)}, so the next scan works offline.</p>` : ''}
+    <p class="hint">${now ? 'The label will be read right away.' : 'It will be queued and read automatically when you are back online' + (S.apiKey ? '.' : ', once your API key is added in Settings.')}
+      The food is also saved to your favorites.</p>
+    <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="l_go">Add to ${MEAL_LABEL[curMeal]}</button></div>`);
+  $('#l_go').onclick = async () => {
+    const id = uid(), name = $('#l_name').value.trim();
+    await idb.put('photos', {id, data:full});
+    await addEntry({id, name:name || 'Nutrition label', cal:0, p:0, c:0, f:0, source:'label', thumb, status:'pending',
+      pending:{type:'label', name, servings:num($('#l_sv').value) || 1, code:code || null}});
+    closeSheet(); toast(now ? 'Reading label…' : 'Queued for reading'); processQueue();
+  };
+}
+const LABEL_SYS = `You read Nutrition Facts panels (or other nutrition information tables) from photos. Report the values for ONE serving exactly as printed; do not estimate or adjust. If the panel shows only per-100 g values, report those and set serving_size to "100 g". If it shows both per-serving and per-container columns, use per-serving. Respond with ONLY a JSON object, no markdown:
+{"product_name":"name if visible on the package, else empty string","serving_size":"as printed, e.g. 2/3 cup (55g)","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"readable":true}
+Set readable to false if the image is not a nutrition panel or the numbers are not legible.`;
+async function resolveLabel(e){
+  const ph = await idb.get('photos', e.id);
+  if (!ph) throw new Error('The label photo is missing. Enter this one manually.');
+  const d = parseJSON(await callClaude([
+    {type:'image', source:{type:'base64', media_type:'image/jpeg', data:ph.data.split(',')[1]}},
+    {type:'text', text:'Read this nutrition label.'}], 600, LABEL_SYS));
+  if (d.readable === false || d.calories == null) throw new Error("The label couldn't be read clearly. Retake it straight-on in good light, or enter it manually.");
+  const s = {label:String(d.serving_size || '1 serving'), cal:num(d.calories), p:num(d.protein_g), c:num(d.carbs_g), f:num(d.fat_g)};
+  const n = e.pending.servings || 1, code = e.pending.code;
+  const name = e.pending.name || String(d.product_name || '').trim() || 'Labeled food';
+  if (code) await idb.put('products', {code, name, serving:s, ts:Date.now()});
+  await idb.put('favorites', {id:uid(), name:`${name} (${s.label})`, cal:r1(s.cal), p:r1(s.p), c:r1(s.c), f:r1(s.f), used:Date.now()});
+  Object.assign(e, {name:name + (n !== 1 ? ` ×${n}` : ''), cal:r1(s.cal*n), p:r1(s.p*n), c:r1(s.c*n), f:r1(s.f*n),
+    serving:s.label, code:code || undefined, status:'ok', pending:null, error:null});
+  await idb.put('entries', e); await idb.del('photos', e.id);
+}
+
+/* ---------- Barcode ---------- */
+async function fetchOFF(code){
+  const r = await netFetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,brands,nutriments,serving_size,serving_quantity`);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new HttpErr(r.status, 'Food database error ' + r.status);
+  const j = await r.json(); if (j.status !== 1 || !j.product) return null;
+  const p = j.product, n = p.nutriments || {};
+  const kcal100 = n['energy-kcal_100g'] ?? (n['energy_100g'] != null ? n['energy_100g'] / 4.184 : null);
+  const sq = num(p.serving_quantity) || null;
+  let serving;
+  if (n['energy-kcal_serving'] != null) serving = {label:p.serving_size || '1 serving', cal:num(n['energy-kcal_serving']), p:num(n.proteins_serving), c:num(n.carbohydrates_serving), f:num(n.fat_serving)};
+  else if (kcal100 != null) { const g = sq || 100; serving = {label:p.serving_size || g + ' g', cal:num(kcal100)*g/100, p:num(n.proteins_100g)*g/100, c:num(n.carbohydrates_100g)*g/100, f:num(n.fat_100g)*g/100}; }
+  else return null;
+  const brand = (p.brands || '').split(',')[0].trim();
+  const name = [brand, p.product_name].filter(Boolean).join(' ') || 'Product ' + code;
+  return {code, name, serving, ts:Date.now()};
+}
+let stream = null, scanTimer = null;
+function stopCam(){ clearTimeout(scanTimer); if (stream){ stream.getTracks().forEach(t => t.stop()); stream = null; } }
+async function scanSheet(){
+  const has = 'BarcodeDetector' in window;
+  sheet(`<h2>Scan a barcode</h2>${has ? `<div class="cam"><video id="sv" playsinline muted></video><div class="reticle"></div></div>`
+      : `<p class="hint">This browser can't scan with the camera. Type the number under the barcode instead.</p>`}
+    <label>Or type the number<input id="bc_in" inputmode="numeric" placeholder="012345678905"></label>
+    <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="bc_go">Look up</button></div>`, stopCam);
+  $('#bc_go').onclick = () => { const v = $('#bc_in').value.replace(/\D/g, ''); if (v.length < 6) return toast('Enter the full barcode number'); gotCode(v); };
+  if (!has) return;
+  try {
+    let formats = ['ean_13','ean_8','upc_a','upc_e'];
+    try { const sup = await BarcodeDetector.getSupportedFormats(); formats = formats.filter(f => sup.includes(f)); } catch {}
+    const det = formats.length ? new BarcodeDetector({formats}) : new BarcodeDetector();
+    stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
+    const v = $('#sv'); if (!v){ stopCam(); return; }
+    v.srcObject = stream; await v.play();
+    const tick = async () => {
+      if (!stream) return;
+      try { const r = await det.detect(v); if (r.length){ navigator.vibrate?.(60); return gotCode(r[0].rawValue); } } catch {}
+      scanTimer = setTimeout(tick, 200);
+    };
+    tick();
+  } catch (err) { toast('Camera unavailable. Type the number instead.'); }
+}
+async function gotCode(code){ closeSheet(); await handleBarcode(code); }
+async function handleBarcode(code){
+  const cached = await idb.get('products', code);
+  if (cached) return servingSheet(cached);
+  toast('Looking up…');
+  try {
+    const p = await fetchOFF(code);
+    if (p){ await idb.put('products', p); return servingSheet(p); }
+    manualSheet({title:'Not in the food database', code});
+  } catch (err) {
+    if (!transient(err)) { toast(err.message); return manualSheet({code}); }
+    sheet(`<h2>No connection</h2><p>Barcode <b>${esc(code)}</b> isn't saved on this phone yet. Queue it and it will be looked up automatically when you reconnect.</p>
+      <label>Servings<input id="q_sv" type="number" inputmode="decimal" step="0.25" value="1"></label>
+      <div class="btns"><button id="q_man">Enter manually</button><button id="q_lbl">Scan the label</button><button class="primary" id="q_go">Queue it</button></div>`);
+    $('#q_lbl').onclick = () => scanLabelFor(code);
+    $('#q_go').onclick = async () => {
+      await addEntry({name:'Barcode ' + code, cal:0, p:0, c:0, f:0, source:'barcode', status:'pending', pending:{type:'barcode', code, servings:num($('#q_sv').value) || 1}});
+      closeSheet(); toast('Queued for lookup');
+    };
+    $('#q_man').onclick = () => manualSheet({code});
+  }
+}
+function servingSheet(p){
+  const s = p.serving;
+  sheet(`<h2>${esc(p.name)}</h2><p class="hint">One serving (${esc(s.label)}): ${r0(s.cal)} cal, P ${r1(s.p)}, C ${r1(s.c)}, F ${r1(s.f)}</p>
+    <label>Servings<input id="s_n" type="number" inputmode="decimal" step="0.25" value="1"></label>
+    <div id="s_tot" class="tot"></div>
+    <div class="btns"><button id="s_edit">Edit values</button><button class="primary" id="s_add">Add to ${MEAL_LABEL[curMeal]}</button></div>`);
+  const upd = () => { const n = num($('#s_n').value); $('#s_tot').textContent = `${r0(s.cal*n)} cal · P ${r0(s.p*n)} · C ${r0(s.c*n)} · F ${r0(s.f*n)}`; };
+  $('#s_n').oninput = upd; upd();
+  $('#s_add').onclick = async () => {
+    const n = num($('#s_n').value) || 1;
+    await addEntry({name:p.name + (n !== 1 ? ` ×${n}` : ''), cal:s.cal*n, p:s.p*n, c:s.c*n, f:s.f*n, source:'barcode', code:p.code});
+    closeSheet(); toast(addedMsg());
+  };
+  $('#s_edit').onclick = () => manualSheet({title:'Edit product values', code:p.code, name:p.name, cal:r1(s.cal), p:r1(s.p), c:r1(s.c), f:r1(s.f)});
+}
+async function resolveBarcode(e){
+  const code = e.pending.code, n = e.pending.servings || 1;
+  let p = await idb.get('products', code);
+  if (!p){ p = await fetchOFF(code); if (!p) throw new Error(`Barcode ${code} isn't in the food database. Tap Enter manually.`); await idb.put('products', p); }
+  const s = p.serving;
+  Object.assign(e, {name:p.name + (n !== 1 ? ` ×${n}` : ''), cal:r1(s.cal*n), p:r1(s.p*n), c:r1(s.c*n), f:r1(s.f*n), code, status:'ok', pending:null, error:null});
+  await idb.put('entries', e);
+}
+
+/* ---------- Offline queue ---------- */
+let qRunning = false;
+async function processQueue(force){
+  if (qRunning || (!navigator.onLine && !force)) return;
+  qRunning = true; let did = 0;
+  try {
+    const pend = (await idb.all('entries')).filter(e => e.status === 'pending').sort((a,b) => a.ts - b.ts);
+    for (const e of pend){
+      const t = e.pending?.type;
+      if (t !== 'barcode' && !S.apiKey) continue;
+      try { await (t === 'barcode' ? resolveBarcode(e) : t === 'label' ? resolveLabel(e) : resolvePhoto(e)); did++; }
+      catch (err) {
+        if (transient(err)) break; // offline or server busy: leave queued, try again later
+        e.status = 'error'; e.error = err.message || String(err); await idb.put('entries', e);
+      }
+    }
+  } finally { qRunning = false; }
+  if (did) toast(`${did} queued ${did === 1 ? 'item' : 'items'} processed`);
+  refresh();
+}
+window.addEventListener('online', () => { updateBadge(); processQueue(); });
+window.addEventListener('offline', updateBadge);
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') { hiddenAt = Date.now(); return; }
+  if (hiddenAt && Date.now() - hiddenAt > 15*60000 && (logTime || logDate)) { logTime = null; logDate = null; curMeal = defaultMeal(); }
+  const t = todayStr(); if (t !== lastToday){ if (curDate === lastToday) curDate = t; lastToday = t; }
+  processQueue(); refresh();
+});
+setInterval(() => processQueue(), 60000);
+
+/* ---------- Trends ---------- */
+function barChart(days, target, key, cls){
+  const W = 340, H = 150, pl = 30, pb = 16, n = days.length;
+  const max = Math.max(target * 1.25, ...days.map(d => d[key]), 1), bw = (W - pl) / n;
+  const Y = v => H - pb - v / max * (H - pb - 6);
+  let s = `<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="Daily ${key === 'cal' ? 'calories' : 'protein'}">`;
+  days.forEach((d, i) => { const y = Y(d[key]); s += `<rect x="${pl + i*bw + bw*0.15}" y="${y}" width="${Math.max(1, bw*0.7)}" height="${H - pb - y}" rx="2" class="${d[key] > target && cls === 'b-ok' ? 'b-over' : cls}"/>`; });
+  const ty = Y(target);
+  s += `<line x1="${pl}" x2="${W}" y1="${ty}" y2="${ty}" class="tline"/><text x="0" y="${ty + 3}" class="tlab">${target}</text>`;
+  s += `<text x="${pl}" y="${H - 2}" class="tlab">${shortD(days[0].d)}</text><text x="${W}" y="${H - 2}" class="tlab" text-anchor="end">${shortD(days[n-1].d)}</text>`;
+  return s + '</svg>';
+}
+function lineChart(pts){
+  if (pts.length < 2) return `<div class="empty">Log at least two weigh-ins to see a trend.</div>`;
+  const W = 340, H = 140, pl = 34, pb = 16, pt = 8, ys = pts.map(p => p.lb);
+  let mn = Math.min(...ys), mx = Math.max(...ys); if (mx - mn < 2){ mn -= 1; mx += 1; }
+  const t0 = dnum(pts[0].date), span = Math.max(1, dnum(pts[pts.length-1].date) - t0);
+  const X = d => pl + (dnum(d) - t0) / span * (W - pl - 6), Y = v => pt + (mx - v) / (mx - mn) * (H - pt - pb);
+  let s = `<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="Weight trend">`;
+  s += `<text x="0" y="${Y(mx) + 4}" class="tlab">${r1(mx)}</text><text x="0" y="${Y(mn) + 4}" class="tlab">${r1(mn)}</text>`;
+  s += `<polyline class="wline" points="${pts.map(p => X(p.date) + ',' + Y(p.lb)).join(' ')}"/>`;
+  s += pts.map(p => `<circle cx="${X(p.date)}" cy="${Y(p.lb)}" r="3" class="wdot"/>`).join('');
+  s += `<text x="${pl}" y="${H - 2}" class="tlab">${shortD(pts[0].date)}</text><text x="${W - 6}" y="${H - 2}" class="tlab" text-anchor="end">${shortD(pts[pts.length-1].date)}</text>`;
+  return s + '</svg>';
+}
+async function renderTrends(){
+  const end = todayStr(), start = addDays(end, -(trendDays - 1));
+  const es = (await idb.dateRange(start, end)).filter(e => e.status === 'ok');
+  const days = []; for (let i = 0; i < trendDays; i++){ const d = addDays(start, i); days.push({d, ...totals(es.filter(e => e.date === d))}); }
+  const logged = days.filter(x => x.cal > 0), avg = k => logged.length ? logged.reduce((a,x) => a + x[k], 0) / logged.length : 0;
+  const ws = (await idb.all('weights')).sort((a,b) => a.date < b.date ? -1 : 1);
+  let wpts = ws.filter(w => w.date >= start); if (wpts.length < 2) wpts = ws.slice(-10);
+  const latest = ws[ws.length - 1], change = wpts.length > 1 ? wpts[wpts.length-1].lb - wpts[0].lb : null;
+  $('#tab-trends').innerHTML = `<div class="chips">${[7,30,90].map(n => `<button class="chip ${n===trendDays?'on':''}" data-act="range" data-n="${n}">${n} days</button>`).join('')}</div>
+  <div class="card"><div class="ctitle"><b>Calories</b><span>dashed line is your target</span></div>${barChart(days, S.cal, 'cal', 'b-ok')}
+    <div class="stats">
+      <div class="stat"><small>Average per logged day</small><b>${r0(avg('cal')).toLocaleString()}<span> / ${S.cal.toLocaleString()}</span></b></div>
+      <div class="stat"><small>Days logged</small><b>${logged.length}<span> of ${trendDays}</span></b></div>
+      <div class="stat"><small>Average carbs</small><b>${r0(avg('c'))}<span> / ${S.c} g</span></b></div>
+      <div class="stat"><small>Average fat</small><b>${r0(avg('f'))}<span> / ${S.f} g</span></b></div>
+    </div></div>
+  <div class="card"><div class="ctitle"><b>Protein</b><span>avg ${r0(avg('p'))} of ${S.p} g</span></div>${barChart(days, S.p, 'p', 'b-p')}</div>
+  <div class="card"><div class="ctitle"><b>Weight</b><span>${latest ? `latest ${r1(latest.lb)} lb` : ''}${change != null ? ` · ${change > 0 ? '+' : ''}${r1(change)} lb` : ''}</span></div>
+    ${lineChart(wpts)}
+    <div class="grid4" style="margin-top:12px"><label>Today's weight (lb)<input id="w_in" type="number" inputmode="decimal" step="0.1" value="${ws.find(w => w.date === end)?.lb ?? ''}"></label>
+    <div class="btns" style="margin-top:20px"><button class="primary" id="w_go">Log weight</button></div></div></div>`;
+  $('#w_go').onclick = async () => { const v = num($('#w_in').value); if (!v) return toast('Enter your weight'); await idb.put('weights', {date:end, lb:r1(v)}); toast('Weight logged'); renderTrends(); };
+}
+
+/* ---------- Settings ---------- */
+function renderSettings(){
+  $('#tab-settings').innerHTML = `
+  <div class="card"><h2>Daily targets</h2>
+    <div class="grid4">${numF('t_cal','Calories',S.cal)}${numF('t_p','Protein (g)',S.p)}${numF('t_c','Carbs (g)',S.c)}${numF('t_f','Fat (g)',S.f)}</div>
+    <p class="hint" id="t_chk"></p>
+    <div class="btns"><button class="primary" id="t_save">Save targets</button></div></div>
+  <div class="card"><h2>Photo estimates</h2>
+    <p class="hint">Photos are analyzed by Claude using your own Anthropic API key. The key is stored only on this phone.</p>
+    <label>API key<input id="ai_key" type="password" autocomplete="off" value="${esc(S.apiKey)}" placeholder="sk-ant-…"></label>
+    <label>Model<input id="ai_model" value="${esc(S.model)}"></label>
+    <div class="btns"><button id="ai_test">Test connection</button><button class="primary" id="ai_save">Save</button></div></div>
+  <div class="card"><h2>Backup</h2>
+    <p class="hint">Your log lives only on this phone. Export a backup now and then, and import it if you switch phones.</p>
+    <div class="btns"><button id="ex_go">Export backup</button><button id="im_go">Import backup</button></div></div>
+  <div class="card"><h2>Erase</h2><div class="btns"><button class="danger" id="wipe">Erase all data</button></div></div>`;
+  const chk = () => { const k = 4*num($('#t_p').value) + 4*num($('#t_c').value) + 9*num($('#t_f').value); $('#t_chk').textContent = `Your macros add up to ${r0(k).toLocaleString()} calories.`; };
+  ['t_p','t_c','t_f'].forEach(id => $('#'+id).oninput = chk); chk();
+  $('#t_save').onclick = async () => { for (const k of ['cal','p','c','f']) S[k] = r0($('#t_'+k).value) || S[k]; await saveSettings(); toast('Targets saved'); };
+  $('#ai_save').onclick = async () => { S.apiKey = $('#ai_key').value.trim(); S.model = $('#ai_model').value.trim() || DEFAULTS.model; await saveSettings(); toast('Saved'); processQueue(); };
+  $('#ai_test').onclick = async () => {
+    S.apiKey = $('#ai_key').value.trim(); S.model = $('#ai_model').value.trim() || DEFAULTS.model;
+    if (!S.apiKey) return toast('Enter your API key first');
+    toast('Testing…');
+    try { await callClaude('Reply with OK.', 10); await saveSettings(); toast('Connected. Key saved.'); }
+    catch (e) { toast(e instanceof NetErr ? 'No connection right now' : 'Failed: ' + e.message); }
+  };
+  $('#ex_go').onclick = exportData;
+  $('#im_go').onclick = () => $('#importInput').click();
+  $('#wipe').onclick = async () => {
+    if (!confirm('Erase every entry, favorite, weight and setting on this phone? This cannot be undone.')) return;
+    for (const s of ['entries','favorites','products','weights','photos','kv']) await idb.replace(s, []);
+    await loadSettings(); toast('All data erased'); refresh();
+  };
+}
+const STORES = ['entries','favorites','products','weights','photos','kv'];
+async function exportData(){
+  const out = {app:'chowlog', v:1, exported:new Date().toISOString()};
+  for (const s of STORES) out[s] = await idb.all(s);
+  out.kv = out.kv.map(r => r.k === 'settings' ? {...r, v:{...r.v, apiKey:''}} : r); // never export the key
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out)], {type:'application/json'}));
+  a.download = `chowlog-backup-${todayStr()}.json`; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000); toast('Backup exported');
+}
+$('#importInput').onchange = async ev => {
+  const file = ev.target.files[0]; ev.target.value = ''; if (!file) return;
+  try {
+    const d = JSON.parse(await file.text()); if (d.app !== 'chowlog') throw new Error();
+    if (!confirm('Replace everything on this phone with this backup?')) return;
+    const key = S.apiKey;
+    for (const s of STORES) await idb.replace(s, d[s] || []);
+    await loadSettings(); if (!S.apiKey && key){ S.apiKey = key; await saveSettings(); }
+    toast('Backup imported'); refresh();
+  } catch { toast("That file isn't a ChowLog backup"); }
+};
+
+/* ---------- wiring ---------- */
+document.addEventListener('click', ev => {
+  const el = ev.target.closest('[data-act],[data-tab]'); if (!el) return;
+  if (el.dataset.tab) return showTab(el.dataset.tab);
+  const d = el.dataset;
+  switch (d.act){
+    case 'close': closeSheet(); break;
+    case 'entry': entrySheet(d.id); break;
+    case 'addto': curMeal = d.meal; if (curDate !== todayStr()) logDate = curDate; showTab('add'); break;
+    case 'meal': curMeal = d.meal; renderAdd(); break;
+    case 'photo': photoMode = {type:'meal'}; $('#photoInput').click(); break;
+    case 'label': photoMode = {type:'label'}; $('#photoInput').click(); break;
+    case 'scan': scanSheet(); break;
+    case 'manual': manualSheet(); break;
+    case 'usefav': useFav(d.id); break;
+    case 'delfav': delFav(d.id); break;
+    case 'userecent': useRecent(+d.i); break;
+    case 'savemeal': saveMealSheet(d.meal); break;
+    case 'range': trendDays = +d.n; renderTrends(); break;
+  }
+});
+document.addEventListener('keydown', ev => {
+  if (ev.key === 'Escape' && !$('#modal').classList.contains('hidden')) closeSheet();
+  if (ev.key === 'Enter' && ev.target.matches('[role="button"][data-act]')) ev.target.click();
+});
+$('#prevDay').onclick = () => { curDate = addDays(curDate, -1); refresh(); };
+$('#nextDay').onclick = () => { if (curDate < todayStr()){ curDate = addDays(curDate, 1); refresh(); } };
+
+(async () => {
+  await loadSettings();
+  try { await navigator.storage?.persist?.(); } catch {}
+  showTab('today');
+  processQueue();
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+})();
+</script>
+</body>
+</html>

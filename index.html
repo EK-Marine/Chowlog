@@ -28,6 +28,7 @@
   --field:#1f281e; --field-2:#2c3829;
 }
 *{box-sizing:border-box}
+[hidden]{display:none !important}
 html,body{margin:0;height:100%}
 body{background:var(--paper);-webkit-tap-highlight-color:transparent;font-size:16px;line-height:1.4}
 button{font:inherit;color:inherit;cursor:pointer}
@@ -137,7 +138,10 @@ h3.hrow{display:flex;align-items:center;justify-content:space-between}
 .act.primary-act small{color:var(--headink);opacity:.7}
 
 .chart{width:100%;height:auto;display:block}
-.b-ok{fill:var(--coyote)}.b-over{fill:var(--signal)}.b-p{fill:var(--kp)}
+.b-ok{fill:var(--coyote)}.b-over{fill:var(--signal)}.b-p{fill:var(--kp)}.b-n{fill:var(--coyote)}
+.mrow{display:grid;grid-template-columns:118px 1fr 48px 38px;align-items:center;gap:8px;padding:5px 0;font-size:14px}
+.mrow b{text-align:right;font-variant-numeric:tabular-nums}.mrow small{color:var(--mute);text-align:right}
+.mtrack{height:10px;border-radius:5px;background:var(--chip);overflow:hidden}.mtrack i{display:block;height:100%;background:var(--coyote);border-radius:5px}
 .tline{stroke:var(--ink);stroke-dasharray:4 3;stroke-width:1;opacity:.5}
 .tlab{font-size:10px;fill:var(--mute)}
 .wline{fill:none;stroke:var(--kp);stroke-width:2.5;stroke-linejoin:round}
@@ -368,6 +372,7 @@ function mealForTime(t){
 }
 function defaultMeal(){ return mealForTime(hhmm(new Date())); }
 let curDate = todayStr(), lastToday = curDate, curTab = 'today', curMeal = defaultMeal(), trendDays = 7, recentCache = [];
+let trendMeals = new Set(MEALS); // meal times included in Trends charts
 let calOpen = false, calMonth = null; // calendar: week strip by default, month when expanded
 let logTime = null, logDate = null; // null = use the current date/time at the moment you log
 
@@ -472,7 +477,7 @@ function entryRow(e){
     <div class="rc">${e.status === 'ok' ? r0(e.cal) : ''}</div></button></div>`;
 }
 async function renderToday(){
-  const es = (await idb.byDate(curDate)).sort((a, b) => byTime(b, a)); // newest first within each meal
+  const es = (await idb.byDate(curDate)).sort((a, b) => byTime(b, a)); // newest first
   const t = totals(es.filter(e => e.status === 'ok'));
   const left = S.cal - t.cal, filled = Math.round(Math.min(t.cal, S.cal) / S.cal * 20);
   const segs = Array.from({length:20}, (_,i) => `<i class="${left < 0 ? 'ov' : i < filled ? 'on' : ''}"></i>`).join('');
@@ -482,14 +487,9 @@ async function renderToday(){
     <div class="segs">${segs}</div>
     <div class="macros">${macro('Protein',t.p,S.p,'p')}${macro('Carbs',t.c,S.c,'c')}${macro('Fat',t.f,S.f,'f')}</div>
   </div>`;
-  for (const m of MEALS){
-    const list = es.filter(e => e.meal === m), mt = totals(list.filter(e => e.status === 'ok'));
-    if (SNACKS.has(m) && !list.length) continue; // snack sections appear only once something is logged in them
-    h += `<div class="card meal"><div class="mh"><b>${MEAL_LABEL[m]}</b><span>${r0(mt.cal)} cal</span><button class="mini" data-act="addto" data-meal="${m}">Add</button></div>`;
-    h += list.length ? list.map(entryRow).join('') : `<div class="empty">Nothing logged yet.</div>`;
-    if (list.filter(e => e.status === 'ok').length > 1) h += `<button class="link" data-act="savemeal" data-meal="${m}">Save as a meal</button>`;
-    h += `</div>`;
-  }
+  h += `<div class="card meal"><div class="mh"><b>Food log</b><span>${es.length} ${es.length === 1 ? 'item' : 'items'}</span><button class="mini" data-act="addto">Add</button></div>`;
+  h += es.length ? es.map(entryRow).join('') : `<div class="empty">Nothing logged ${curDate === todayStr() ? 'yet today' : 'this day'}.</div>`;
+  h += `</div>`;
   $('#tab-today').innerHTML = h;
 }
 
@@ -504,8 +504,7 @@ async function renderAdd(){
   if (builder) return renderBuilder();
   const favs = (await idb.all('favorites')).sort((a,b) => (b.used||0) - (a.used||0));
   recentCache = await recentItems();
-  let h = `<div class="chips">${MEALS.map(m => `<button class="chip ${m===curMeal?'on':''}" data-act="meal" data-meal="${m}">${MEAL_LABEL[m]}</button>`).join('')}</div>
-  <div class="when"><label>Date eaten<input type="date" id="lw_date" value="${logDate || todayStr()}" max="${todayStr()}"></label>
+  let h = `  <div class="when"><label>Date eaten<input type="date" id="lw_date" value="${logDate || todayStr()}" max="${todayStr()}"></label>
     ${timeInput('lw_time', 'Time eaten', logTime || hhmm(new Date()))}</div>
   ${logTime || logDate ? `<p class="when-note">Logging for ${logDate ? shortD(logDate) : 'today'} at ${fmtTime(logTime || hhmm(new Date()))}. <button class="link" id="lw_now" style="padding:0">Reset to now</button></p>` : ''}
   <div class="actions">
@@ -545,7 +544,7 @@ function recentList(){
 
 /* ---------- Meal builder ---------- */
 let builder = null; // {id?, name, items:[{name,cal,p,c,f}]} while creating/editing a saved meal
-const addLabel = () => builder ? (builder.recipe ? 'Add to recipe' : 'Add to meal') : `Add to ${MEAL_LABEL[curMeal]}`;
+const addLabel = () => builder ? (builder.recipe ? 'Add to recipe' : 'Add to meal') : 'Add to log';
 async function renderBuilder(){
   const favs = (await idb.all('favorites')).sort((a,b) => (b.used||0) - (a.used||0));
   recentCache = await recentItems();
@@ -621,11 +620,12 @@ async function addToBuilder(o){
   toast(builder.recipe ? 'Added to recipe' : 'Added to meal'); if (curTab === 'add') renderAdd();
 }
 
-const addedMsg = () => builder ? (builder.recipe ? 'Added to recipe' : 'Added to meal') : `Added to ${MEAL_LABEL[curMeal]}${logDate ? ' on ' + shortD(logDate) : ''}`;
+const addedMsg = () => builder ? (builder.recipe ? 'Added to recipe' : 'Added to meal') : `Added${logDate ? ' to ' + shortD(logDate) : ''}`;
 async function addEntry(o){
   if (builder) return addToBuilder(o);
-  const e = {id:uid(), date:logDate || todayStr(), meal:curMeal, status:'ok', source:'manual', ...o};
-  e.time = o.time || logTime || hhmm(new Date()); e.created = Date.now(); e.ts = tsOf(e.date, e.time);
+  const e = {id:uid(), date:logDate || todayStr(), status:'ok', source:'manual', ...o};
+  e.time = o.time || logTime || hhmm(new Date()); e.meal = o.meal || mealForTime(e.time); // meal comes from the time eaten
+  e.created = Date.now(); e.ts = tsOf(e.date, e.time);
   for (const k of ['cal','p','c','f']) e[k] = r1(e[k]);
   await idb.put('entries', e); refresh(); return e;
 }
@@ -836,18 +836,16 @@ $('#photoInput').onchange = async ev => {
     const x = await exifDate(file);
     if (x && validDate(x.date) && Math.abs(tsOf(x.date, x.time) - Date.now()) > 30*60000) taken = x;
   }
-  const meal = () => taken && ($('#p_when') ? $('#p_when').checked : true) ? mealForTime(taken.time) : curMeal;
   sheet(`<h2>Log a photo</h2><img class="prev" src="${thumb}" alt="">
     ${taken ? `<label class="chk"><input type="checkbox" id="p_when" checked> Log it when the photo was taken: ${taken.date === todayStr() ? 'today' : shortD(taken.date)}, ${fmtTime(taken.time)}</label>` : ''}
     <label>Note (optional, improves accuracy)<textarea id="p_note" placeholder="About 2 cups of rice, cooked in butter"></textarea></label>
     <p class="hint">${now ? 'It will be analyzed right away.' : 'It will be queued and analyzed automatically when you are back online' + (S.apiKey ? '.' : ', once your API key is added in Settings.')}</p>
-    <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="p_go">${builder ? 'Add to meal' : 'Add to ' + MEAL_LABEL[meal()]}</button></div>`);
-  if (taken) $('#p_when').onchange = () => { $('#p_go').textContent = `Add to ${MEAL_LABEL[meal()]}`; };
+    <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="p_go">${addLabel()}</button></div>`);
   $('#p_go').onclick = async () => {
     const id = uid(), useTaken = taken && $('#p_when').checked;
     await idb.put('photos', {id, data:full});
     await addEntry({id, name:'Photo meal', cal:0, p:0, c:0, f:0, source:'ai', thumb, status:'pending', pending:{type:'photo', note:$('#p_note').value.trim()},
-      meal:meal(), ...(useTaken ? {date:taken.date, time:taken.time} : {})});
+      ...(useTaken ? {date:taken.date, time:taken.time} : {})});
     if (builder) return; closeSheet(); toast(now ? 'Analyzing…' : 'Queued for analysis'); processQueue();
   };
 };
@@ -1133,12 +1131,12 @@ setInterval(() => processQueue(), 60000);
 /* ---------- Trends ---------- */
 function barChart(days, target, key, cls){
   const W = 340, H = 150, pl = 30, pb = 16, n = days.length;
-  const max = Math.max(target * 1.25, ...days.map(d => d[key]), 1), bw = (W - pl) / n;
+  const max = Math.max((target || 0) * 1.25, ...days.map(d => d[key]) .map(v => v * 1.1), 1), bw = (W - pl) / n;
   const Y = v => H - pb - v / max * (H - pb - 6);
   let s = `<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="Daily ${key === 'cal' ? 'calories' : 'protein'}">`;
   days.forEach((d, i) => { const y = Y(d[key]); s += `<rect x="${pl + i*bw + bw*0.15}" y="${y}" width="${Math.max(1, bw*0.7)}" height="${H - pb - y}" rx="2" ${cls === 'b-ok' ? `style="fill:${goalColor(d[key], target)}"` : `class="${cls}"`}/>`; });
-  const ty = Y(target);
-  s += `<line x1="${pl}" x2="${W}" y1="${ty}" y2="${ty}" class="tline"/><text x="0" y="${ty + 3}" class="tlab">${target}</text>`;
+  if (target) { const ty = Y(target); s += `<line x1="${pl}" x2="${W}" y1="${ty}" y2="${ty}" class="tline"/><text x="0" y="${ty + 3}" class="tlab">${target}</text>`; }
+  else s += `<text x="0" y="${Y(max/1.1) + 3}" class="tlab">${r0(max/1.1)}</text>`;
   s += `<text x="${pl}" y="${H - 2}" class="tlab">${shortD(days[0].d)}</text><text x="${W}" y="${H - 2}" class="tlab" text-anchor="end">${shortD(days[n-1].d)}</text>`;
   return s + '</svg>';
 }
@@ -1157,21 +1155,33 @@ function lineChart(pts){
 }
 async function renderTrends(){
   const end = todayStr(), start = addDays(end, -(trendDays - 1));
-  const es = (await idb.dateRange(start, end)).filter(e => e.status === 'ok');
+  const all = (await idb.dateRange(start, end)).filter(e => e.status === 'ok');
+  const allMeals = trendMeals.size === MEALS.length, es = all.filter(e => trendMeals.has(e.meal));
   const days = []; for (let i = 0; i < trendDays; i++){ const d = addDays(start, i); days.push({d, ...totals(es.filter(e => e.date === d))}); }
-  const logged = days.filter(x => x.cal > 0), avg = k => logged.length ? logged.reduce((a,x) => a + x[k], 0) / logged.length : 0;
+  const loggedDays = new Set(all.map(e => e.date)); // a day counts as logged if anything was logged that day
+  const logged = days.filter(x => loggedDays.has(x.d)), avg = k => logged.length ? logged.reduce((a,x) => a + x[k], 0) / logged.length : 0;
+  const nLogged = Math.max(1, loggedDays.size), dayAvg = totals(all).cal / nLogged;
+  const byMeal = MEALS.map(m => ({m, ...totals(all.filter(e => e.meal === m))})).map(x => ({...x, avg:x.cal / nLogged}));
+  const topMeal = Math.max(1, ...byMeal.map(x => x.avg));
+  const mealNames = allMeals ? 'All meals' : MEALS.filter(m => trendMeals.has(m)).map(m => MEAL_LABEL[m]).join(', ');
   const ws = (await idb.all('weights')).sort((a,b) => a.date < b.date ? -1 : 1);
   let wpts = ws.filter(w => w.date >= start); if (wpts.length < 2) wpts = ws.slice(-10);
   const latest = ws[ws.length - 1], change = wpts.length > 1 ? wpts[wpts.length-1].lb - wpts[0].lb : null;
+  const sl = (v, t) => allMeals ? `<span> / ${t}</span>` : '';
   $('#tab-trends').innerHTML = `<div class="chips">${[7,30,90].map(n => `<button class="chip ${n===trendDays?'on':''}" data-act="range" data-n="${n}">${n} days</button>`).join('')}</div>
-  <div class="card"><div class="ctitle"><b>Calories</b><span>green = within 5% of target</span></div>${barChart(days, S.cal, 'cal', 'b-ok')}
+  <div class="chips">${`<button class="chip ${allMeals?'on':''}" data-act="tmeal" data-m="all">All meals</button>` +
+    MEALS.map(m => `<button class="chip ${!allMeals && trendMeals.has(m) ? 'on' : ''}" data-act="tmeal" data-m="${m}">${MEAL_LABEL[m]}</button>`).join('')}</div>
+  <div class="card"><div class="ctitle"><b>Calories</b><span>${allMeals ? 'green = within 5% of target' : esc(mealNames)}</span></div>${barChart(days, allMeals ? S.cal : 0, 'cal', allMeals ? 'b-ok' : 'b-n')}
     <div class="stats">
-      <div class="stat"><small>Average per logged day</small><b>${r0(avg('cal')).toLocaleString()}<span> / ${S.cal.toLocaleString()}</span></b></div>
+      <div class="stat"><small>Average per logged day</small><b>${r0(avg('cal')).toLocaleString()}${sl(0, S.cal.toLocaleString())}</b></div>
       <div class="stat"><small>Days logged</small><b>${logged.length}<span> of ${trendDays}</span></b></div>
-      <div class="stat"><small>Average carbs</small><b>${r0(avg('c'))}<span> / ${S.c} g</span></b></div>
-      <div class="stat"><small>Average fat</small><b>${r0(avg('f'))}<span> / ${S.f} g</span></b></div>
+      <div class="stat"><small>Average carbs</small><b>${r0(avg('c'))}${sl(0, S.c + ' g')}${allMeals ? '' : '<span> g</span>'}</b></div>
+      <div class="stat"><small>Average fat</small><b>${r0(avg('f'))}${sl(0, S.f + ' g')}${allMeals ? '' : '<span> g</span>'}</b></div>
     </div></div>
-  <div class="card"><div class="ctitle"><b>Protein</b><span>avg ${r0(avg('p'))} of ${S.p} g</span></div>${barChart(days, S.p, 'p', 'b-p')}</div>
+  <div class="card"><div class="ctitle"><b>Protein</b><span>avg ${r0(avg('p'))}${allMeals ? ` of ${S.p}` : ''} g</span></div>${barChart(days, allMeals ? S.p : 0, 'p', 'b-p')}</div>
+  <div class="card"><div class="ctitle"><b>By meal time</b><span>average per logged day</span></div>
+    ${all.length ? byMeal.map(x => `<div class="mrow"><span>${MEAL_LABEL[x.m]}</span><div class="mtrack"><i style="width:${x.avg / topMeal * 100}%"></i></div>
+      <b>${r0(x.avg).toLocaleString()}</b><small>${dayAvg ? r0(x.avg / dayAvg * 100) : 0}%</small></div>`).join('') : '<div class="empty">Log some food to see your meal-time breakdown.</div>'}</div>
   <div class="card"><div class="ctitle"><b>Weight</b><span>${latest ? `latest ${r1(latest.lb)} lb` : ''}${change != null ? ` · ${change > 0 ? '+' : ''}${r1(change)} lb` : ''}</span></div>
     ${lineChart(wpts)}
     <div class="grid4" style="margin-top:12px"><label>Today's weight (lb)<input id="w_in" type="number" inputmode="decimal" step="0.1" value="${ws.find(w => w.date === end)?.lb ?? ''}"></label>
@@ -1332,7 +1342,7 @@ document.addEventListener('click', ev => {
   switch (d.act){
     case 'close': closeSheet(); break;
     case 'entry': entrySheet(d.id); break;
-    case 'addto': curMeal = d.meal; if (curDate !== todayStr()) logDate = curDate; showTab('add'); break;
+    case 'addto': if (curDate !== todayStr()) logDate = curDate; showTab('add'); break;
     case 'meal': curMeal = d.meal; renderAdd(); break;
     case 'photo': choosePhoto({type:'meal'}); break;
     case 'label': choosePhoto({type:'label'}); break;
@@ -1351,6 +1361,14 @@ document.addEventListener('click', ev => {
     case 'userecent': useRecent(+d.i); break;
     case 'savemeal': saveMealSheet(d.meal); break;
     case 'range': trendDays = +d.n; renderTrends(); break;
+    case 'tmeal':
+      if (d.m === 'all') trendMeals = new Set(MEALS);
+      else {
+        if (trendMeals.size === MEALS.length) trendMeals = new Set([d.m]);           // from "All": show just this meal
+        else if (trendMeals.has(d.m)) { trendMeals.delete(d.m); if (!trendMeals.size) trendMeals = new Set(MEALS); }
+        else trendMeals.add(d.m);
+      }
+      renderTrends(); break;
     case 'pickday': if (d.d <= todayStr()) { curDate = d.d; calOpen = false; calMonth = null; refresh(); } break;
     case 'caltoggle': calOpen = !calOpen; calMonth = calOpen ? curDate.slice(0,7) + '-01' : null; refresh(); break;
     case 'calweek': { const n = addDays(curDate, +d.n); curDate = n > todayStr() ? todayStr() : n; refresh(); break; }

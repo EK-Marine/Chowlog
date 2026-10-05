@@ -300,8 +300,18 @@ function fmtAmt(v){
 const amtInput = (id, label, val = '1') => `<label>${label}<input id="${id}" inputmode="decimal" autocomplete="off" value="${val}"></label>`;
 const fracChips = id => `<div class="fr" data-for="${id}">${['¼','⅓','½','⅔','¾','1','1½','2'].map(x => `<button type="button" data-act="frac" data-v="${x}">${x}</button>`).join('')}</div>`;
 const amtOf = id => { const v = parseAmt($('#' + id).value); return v > 0 ? v : NaN; };
-const UNITS = {serving:{l:'servings'}, g:{l:'g', f:1}, oz:{l:'oz', f:28.3495}, lb:{l:'lb', f:453.592}, ml:{l:'ml', f:1}, floz:{l:'fl oz', f:29.5735}};
-function unitsFor(p){ return !p.size ? ['serving'] : p.basis === 'ml' ? ['serving','ml','floz'] : ['serving','g','oz','lb']; }
+const UNITS = {serving:{l:'servings'}, g:{l:'g', f:1}, kg:{l:'kg', f:1000}, oz:{l:'oz', f:28.3495}, lb:{l:'lb', f:453.592}, ml:{l:'ml', f:1}, l:{l:'L', f:1000}, floz:{l:'fl oz', f:29.5735}};
+function unitsFor(p){
+  if (!p.size) return ['serving'];
+  if (metric()) return p.basis === 'ml' ? ['serving','ml','l'] : ['serving','g','kg'];
+  return p.basis === 'ml' ? ['serving','floz','ml'] : ['serving','oz','lb','g'];
+}
+/* body measurements: stored in lb and inches, shown in the user's units */
+const metric = () => S.units === 'metric';
+const wU = () => metric() ? 'kg' : 'lb';
+const toW = lb => metric() ? lb * 0.453592 : lb;      // stored lb → display
+const fromW = v => metric() ? v / 0.453592 : v;       // display → stored lb
+const fmtW = lb => r1(toW(lb)).toLocaleString();
 function amtText(a, u){ return u === 'serving' ? `${fmtAmt(a)} serving${a === 1 ? '' : 's'}` : `${fmtAmt(a)} ${UNITS[u].l}`; }
 function normalizeProduct(p){
   if (!p.size) { const m = String(p.serving?.label || '').match(/(\d+(?:\.\d+)?)\s*(g|ml)\b/i); if (m) { p.size = +m[1]; p.basis = m[2].toLowerCase(); } }
@@ -375,7 +385,7 @@ const idb = {
 };
 
 /* ---------- settings & state ---------- */
-const DEFAULTS = {cal:2200, p:160, c:220, f:70, apiKey:'', model:'claude-sonnet-5-5', timeFmt:'12'};
+const DEFAULTS = {cal:2200, p:160, c:220, f:70, apiKey:'', model:'claude-sonnet-5-5', timeFmt:'12', units:'imperial'};
 let S = {...DEFAULTS};
 async function loadSettings(){ const r = await idb.get('kv','settings'); S = {...DEFAULTS, ...(r ? r.v : {})}; }
 const saveSettings = () => idb.put('kv', {k:'settings', v:S});
@@ -1098,7 +1108,8 @@ function servingSheet(p, source = 'barcode'){
   const upd = () => { const k = factor(); $('#s_tot').textContent = isNaN(k) ? 'Enter an amount like 1.5 or 1 1/2' : `${r0(s.cal*k)} cal · P ${r0(s.p*k)} · C ${r0(s.c*k)} · F ${r0(s.f*k)}`; };
   $('#s_n').oninput = upd;
   $('#s_u').onchange = () => { const u = $('#s_u').value;
-    $('#s_n').value = u === 'serving' ? '1' : fmtAmt(Math.round(p.size / UNITS[u].f * (u === 'lb' ? 100 : u === 'g' || u === 'ml' ? 1 : 10)) / (u === 'lb' ? 100 : u === 'g' || u === 'ml' ? 1 : 10)); upd(); };
+    const q = ({g:1, ml:1, oz:10, floz:10})[u] || 100;
+    $('#s_n').value = u === 'serving' ? '1' : fmtAmt(Math.round(p.size / UNITS[u].f * q) / q); upd(); };
   upd();
   $('#s_add').onclick = async () => {
     const k = factor(); if (!(k > 0)) return toast('Enter an amount like 1.5 or 1 1/2');
@@ -1188,6 +1199,7 @@ async function renderTrends(){
   const ws = (await idb.all('weights')).sort((a,b) => a.date < b.date ? -1 : 1);
   let wpts = ws.filter(w => w.date >= start); if (wpts.length < 2) wpts = ws.slice(-10);
   const latest = ws[ws.length - 1], change = wpts.length > 1 ? wpts[wpts.length-1].lb - wpts[0].lb : null;
+  wpts = wpts.map(w => ({date:w.date, lb:toW(w.lb)})); // chart in display units
   const sl = (v, t) => allMeals ? `<span> / ${t}</span>` : '';
   $('#tab-trends').innerHTML = `<div class="chips">${[7,30,90].map(n => `<button class="chip ${n===trendDays?'on':''}" data-act="range" data-n="${n}">${n} days</button>`).join('')}</div>
   <div class="chips">${`<button class="chip ${allMeals?'on':''}" data-act="tmeal" data-m="all">All meals</button>` +
@@ -1203,11 +1215,11 @@ async function renderTrends(){
   <div class="card"><div class="ctitle"><b>By meal time</b><span>average per logged day</span></div>
     ${all.length ? byMeal.map(x => `<div class="mrow"><span>${MEAL_LABEL[x.m]}</span><div class="mtrack"><i style="width:${x.avg / topMeal * 100}%"></i></div>
       <b>${r0(x.avg).toLocaleString()}</b><small>${dayAvg ? r0(x.avg / dayAvg * 100) : 0}%</small></div>`).join('') : '<div class="empty">Log some food to see your meal-time breakdown.</div>'}</div>
-  <div class="card"><div class="ctitle"><b>Weight</b><span>${latest ? `latest ${r1(latest.lb)} lb` : ''}${change != null ? ` · ${change > 0 ? '+' : ''}${r1(change)} lb` : ''}</span></div>
+  <div class="card"><div class="ctitle"><b>Weight</b><span>${latest ? `latest ${fmtW(latest.lb)} ${wU()}` : ''}${change != null ? ` · ${change > 0 ? '+' : ''}${r1(toW(change))} ${wU()}` : ''}</span></div>
     ${lineChart(wpts)}
-    <div class="grid4" style="margin-top:12px"><label>Today's weight (lb)<input id="w_in" type="number" inputmode="decimal" step="0.1" value="${ws.find(w => w.date === end)?.lb ?? ''}"></label>
+    <div class="grid4" style="margin-top:12px"><label>Today's weight (${wU()})<input id="w_in" type="number" inputmode="decimal" step="0.1" value="${ws.find(w => w.date === end) ? r1(toW(ws.find(w => w.date === end).lb)) : ''}"></label>
     <div class="btns" style="margin-top:20px"><button class="primary" id="w_go">Log weight</button></div></div></div>`;
-  $('#w_go').onclick = async () => { const v = num($('#w_in').value); if (!v) return toast('Enter your weight'); await idb.put('weights', {date:end, lb:r1(v)}); toast('Weight logged'); renderTrends(); };
+  $('#w_go').onclick = async () => { const v = num($('#w_in').value); if (!v) return toast('Enter your weight'); await idb.put('weights', {date:end, lb:Math.round(fromW(v) * 100) / 100}); toast('Weight logged'); renderTrends(); };
 }
 
 /* ---------- Goal setup (first run, or Settings → Estimate my targets) ---------- */
@@ -1229,11 +1241,15 @@ const GOALS = {
   recomp:{l:'Lose fat and build muscle', d:'Small deficit, high protein, lift weights'},
   maintain:{l:'Maintain', d:'Hold your current weight'},
   gain:{l:'Build muscle', d:'Small surplus, high protein, lift weights'}};
-const PACE = {lose:[[0.5,'0.5 lb/week','Easiest to stick with'],[1,'1 lb/week','Steady, most common'],[1.5,'1.5 lb/week','Aggressive']],
-              gain:[[250,'Lean gain','≈ +250 cal/day, less fat gain'],[450,'Faster gain','≈ +450 cal/day, more size']]};
+const PACE_DESC = ['Easiest to stick with', 'Steady, most common', 'Aggressive'];
+const PACE = { // lose: values in lb/week
+  get lose(){ return metric() ? [0.25,0.5,0.75].map((k,i) => [Math.round(k / 0.453592 * 1000) / 1000, k + ' kg/week', PACE_DESC[i]]) : [0.5,1,1.5].map((v,i) => [v, v + ' lb/week', PACE_DESC[i]]); },
+  gain:[[250,'Lean gain','≈ +250 cal/day, less fat gain'],[450,'Faster gain','≈ +450 cal/day, more size']]};
+const nearestPace = v => PACE.lose.reduce((a, o) => Math.abs(o[0] - v) < Math.abs(a[0] - v) ? o : a)[0];
+const pfShow = v => metric() ? (Math.round(v * 2.20462 * 10) / 10).toFixed(1) : v.toFixed(1); // g per lb → g per kg
 // Protein in grams per lb (of goal weight when losing, otherwise body weight). Defaults follow the research; users can pick higher.
 const PF_DEFAULT = {lose:1, recomp:1, gain:1, maintain:0.8};
-const PF_OPTS = [[0.8,'0.8','Standard'],[1,'1.0','Active'],[1.2,'1.2','High'],[1.5,'1.5','Very high']];
+const PF_OPTS = [[0.8,'Standard'],[1,'Active'],[1.2,'High'],[1.5,'Very high']];
 // Mifflin-St Jeor BMR × activity, then adjusted for the goal, with safety floors.
 function calcTargets(o){
   const kg = o.lb * 0.453592, cm = (o.ft * 12 + o.inch) * 2.54;
@@ -1242,7 +1258,7 @@ function calcTargets(o){
   let cal = tdee, notes = [], lbwk = 0;
   if (o.goal === 'lose') {
     lbwk = Math.min(o.pace, o.lb * 0.01);
-    if (lbwk < o.pace) notes.push(`Pace capped at ${r1(lbwk)} lb/week (about 1% of body weight), the safe upper limit.`);
+    if (lbwk < o.pace) notes.push(`Pace capped at ${r1(toW(lbwk))} ${wU()}/week (about 1% of body weight), the safe upper limit.`);
     cal = tdee - lbwk * 500;
   } else if (o.goal === 'recomp') cal = tdee * 0.9;
   else if (o.goal === 'gain') cal = tdee + o.pace;
@@ -1261,6 +1277,7 @@ function openSetup(first){
   if (ob.act && !S.profile?.life) { // older single activity question → split into daily life + workouts
     ob.wfreq = {sed:0, light:1.5, mod:3.5, very:5.5, ext:5.5}[ob.act] ?? 3.5; if (ob.act === 'ext') ob.life = 'phys'; delete ob.act; }
   if (!ob.pf) ob.pf = PF_DEFAULT[ob.goal];
+  ob.units = S.units || 'imperial'; if (ob.goal === 'lose') ob.pace = nearestPace(ob.pace);
   if (!ob.lb) { /* prefill weight from the latest weigh-in */ idb.all('weights').then(ws => { const w = ws.sort((a,b) => a.date < b.date ? -1 : 1).pop(); if (w && ob && !ob.lb) { ob.lb = w.lb; renderSetup(); } }); }
   renderSetup();
 }
@@ -1276,9 +1293,11 @@ function renderSetup(){
     <p>First, let's set your daily calorie and protein targets. It takes about a minute.</p>
     <div class="btns"><button data-act="obskip">I'll set them myself</button><button class="primary" data-act="obnext">Estimate my targets</button></div>`;
   else if (s === 1) h = `${dots}<h2>About you</h2><p class="hint">Used only to estimate your calorie needs. Stays on this phone.</p>
+    <div class="seg">${obChoice('units','imperial','Imperial','lb, ft/in')}${obChoice('units','metric','Metric','kg, cm')}</div>
     <div class="seg">${obChoice('sex','m','Male')}${obChoice('sex','f','Female')}</div>
-    <div class="grid4"><label>Age<input id="ob_age" inputmode="numeric" value="${ob.age}"></label><label>Weight (lb)<input id="ob_lb" inputmode="decimal" value="${ob.lb}"></label></div>
-    <div class="grid4"><label>Height (ft)<input id="ob_ft" inputmode="numeric" value="${ob.ft}"></label><label>(in)<input id="ob_in" inputmode="numeric" value="${ob.inch}"></label></div>
+    <div class="grid4"><label>Age<input id="ob_age" inputmode="numeric" value="${ob.age}"></label><label>Weight (${wU()})<input id="ob_lb" inputmode="decimal" value="${ob.lb === '' ? '' : r1(toW(+ob.lb))}"></label></div>
+    ${metric() ? `<label>Height (cm)<input id="ob_cm" inputmode="numeric" value="${ob.ft === '' ? '' : Math.round((+ob.ft * 12 + +ob.inch) * 2.54)}"></label>`
+      : `<div class="grid4"><label>Height (ft)<input id="ob_ft" inputmode="numeric" value="${ob.ft}"></label><label>(in)<input id="ob_in" inputmode="numeric" value="${ob.inch === '' ? '' : Math.round(+ob.inch)}"></label></div>`}
     ${nav(!ob.first ? false : true)}`;
   else if (s === 2) h = `${dots}<h2>Your daily activity</h2><p class="hint">Your job and normal day, not counting workouts. If you're between two, pick the lower one.</p>
     <div class="opts">${Object.entries(LIFE).map(([k,a]) => obChoice('life', k, a.l, a.d)).join('')}</div>${nav(true)}`;
@@ -1291,19 +1310,19 @@ function renderSetup(){
   else if (s === 4) h = `${dots}<h2>What's your goal?</h2>
     <div class="opts">${Object.entries(GOALS).map(([k,g]) => obChoice('goal', k, g.l, g.d)).join('')}</div>
     ${PACE[ob.goal] ? `<h3 style="margin:14px 2px 6px">Pace</h3><div class="opts">${PACE[ob.goal].map(([v,t,d]) => obChoice('pace', v, t, d)).join('')}</div>` : ''}
-    ${ob.goal === 'lose' || ob.goal === 'recomp' ? `<label style="margin-top:10px">Goal weight (lb, optional)<input id="ob_goal" inputmode="decimal" value="${ob.goalLb}"></label>` : ''}
+    ${ob.goal === 'lose' || ob.goal === 'recomp' ? `<label style="margin-top:10px">Goal weight (${wU()}, optional)<input id="ob_goal" inputmode="decimal" value="${ob.goalLb === '' ? '' : r1(toW(+ob.goalLb))}"></label>` : ''}
     ${nav(true, true, 'See my targets')}`;
   else if (s === 5) {
     const r = calcTargets(ob), diff = r.cal - r.tdee;
     h = `${dots}<h2>Your daily targets</h2>
       <div class="obres"><span>${r.cal.toLocaleString()}</span><small>calories per day</small></div>
-      <p class="hint">Maintenance is about ${r.tdee.toLocaleString()} cal/day${r.ex ? ` (${r.life.toLocaleString()} from daily life + ${r.ex.toLocaleString()} from workouts, averaged over the week)` : ''}. ${diff < 0 ? `This is ${Math.abs(diff).toLocaleString()} below it${ob.goal === 'lose' ? `, about ${r1(r.lbwk)} lb of loss per week` : ''}.` : diff > 0 ? `This is ${diff.toLocaleString()} above it for steady muscle gain alongside strength training.` : 'This holds your weight steady.'}</p>
+      <p class="hint">Maintenance is about ${r.tdee.toLocaleString()} cal/day${r.ex ? ` (${r.life.toLocaleString()} from daily life + ${r.ex.toLocaleString()} from workouts, averaged over the week)` : ''}. ${diff < 0 ? `This is ${Math.abs(diff).toLocaleString()} below it${ob.goal === 'lose' ? `, about ${r1(toW(r.lbwk))} ${wU()} of loss per week` : ''}.` : diff > 0 ? `This is ${diff.toLocaleString()} above it for steady muscle gain alongside strength training.` : 'This holds your weight steady.'}</p>
       ${r.notes.map(n => `<p class="hint" style="color:var(--signal)">${esc(n)}</p>`).join('')}
-      <h3 style="margin:14px 2px 6px">Protein, grams per lb of ${ob.goalLb && ob.goalLb < ob.lb ? 'goal' : 'body'} weight</h3>
-      <div class="seg4">${PF_OPTS.map(([v,t,d]) => obChoice('pf', v, t + (v === PF_DEFAULT[ob.goal] ? ' ✓' : ''), d)).join('')}</div>
+      <h3 style="margin:14px 2px 6px">Protein, grams per ${wU()} of ${ob.goalLb && ob.goalLb < ob.lb ? 'goal' : 'body'} weight</h3>
+      <div class="seg4">${PF_OPTS.map(([v,d]) => obChoice('pf', v, pfShow(v) + (v === PF_DEFAULT[ob.goal] ? ' ✓' : ''), d)).join('')}</div>
       <p class="hint">✓ = recommended for your goal. ${ob.pf > PF_DEFAULT[ob.goal] ? `Your pick adds ${r0((ob.pf - PF_DEFAULT[ob.goal]) * (ob.goalLb && ob.goalLb < ob.lb ? ob.goalLb : ob.lb))} g of protein a day, so carbs were lowered to stay within your calories.` : ''}</p>
-      <details class="why" ${ob.goal === 'gain' || ob.pf > PF_DEFAULT[ob.goal] ? 'open' : ''}><summary>Why not 1.5 g per lb?</summary>
-        <p>You may have heard 1.5 g per lb for building muscle. It's common gym advice, but the research doesn't support it: a review of 49 studies on people lifting weights (Morton et al., 2018) found muscle gain levels off around 0.7 g per lb, with about 1 g per lb as a generous upper limit. That's why ChowLog recommends 1 g per lb.</p>
+      <details class="why" ${ob.goal === 'gain' || ob.pf > PF_DEFAULT[ob.goal] ? 'open' : ''}><summary>Why not ${metric() ? '3.3 g per kg' : '1.5 g per lb'}?</summary>
+        <p>You may have heard ${metric() ? '3.3 g per kg (1.5 g per lb)' : '1.5 g per lb'} for building muscle. It's common gym advice, but the research doesn't support it: a review of 49 studies on people lifting weights (Morton et al., 2018) found muscle gain levels off around ${metric() ? '1.6 g per kg' : '0.7 g per lb'}, with about ${metric() ? '2.2 g per kg' : '1 g per lb'} as a generous upper limit. That's why ChowLog recommends ${metric() ? '2.2 g per kg' : '1 g per lb'}.</p>
         <p>More protein isn't harmful for most healthy people, it just doesn't build more muscle, and it uses calories that could otherwise fuel your training. If you prefer a higher amount, pick it above. If you have kidney disease, follow your doctor's protein advice.</p></details>
       <div class="grid4">${numF('ob_cal','Calories',r.cal)}${numF('ob_p','Protein (g)',r.p)}${numF('ob_c','Carbs (g)',r.c)}${numF('ob_f','Fat (g)',r.f)}</div>
       <p class="hint">You can adjust these now or later in Settings. These are estimates from a standard formula (Mifflin-St Jeor); everyone's body is different, so watch your weight trend for 2–3 weeks and adjust. Check with your doctor or a dietitian before big changes, especially if you have a medical condition or are pregnant or nursing.</p>
@@ -1317,8 +1336,15 @@ function renderSetup(){
 }
 function obRead(){
   const g = id => $('#' + id) ? $('#' + id).value.trim() : undefined;
-  if (ob.step === 1) { ob.age = g('ob_age'); ob.lb = g('ob_lb'); ob.ft = g('ob_ft'); ob.inch = g('ob_in') || '0'; }
-  if (ob.step === 4 && $('#ob_goal')) ob.goalLb = g('ob_goal');
+  if (ob.step === 1) {
+    // only convert values the user changed, so switching units back and forth doesn't drift
+    ob.age = g('ob_age'); const w = g('ob_lb');
+    if (!w) ob.lb = ''; else if (ob.lb === '' || num(w) !== r1(toW(+ob.lb))) ob.lb = fromW(num(w));
+    if (metric()) { const cm = num(g('ob_cm')), had = ob.ft === '' ? null : Math.round((+ob.ft * 12 + +ob.inch) * 2.54);
+      if (!cm) { ob.ft = ''; ob.inch = ''; } else if (cm !== had) { const ti = cm / 2.54; ob.ft = Math.floor(ti / 12); ob.inch = Math.round((ti - ob.ft * 12) * 10) / 10; } }
+    else { ob.ft = g('ob_ft'); ob.inch = g('ob_in') || '0'; }
+  }
+  if (ob.step === 4 && $('#ob_goal')) { const gw = g('ob_goal'); ob.goalLb = !gw ? '' : ob.goalLb !== '' && num(gw) === r1(toW(+ob.goalLb)) ? ob.goalLb : fromW(num(gw)); }
 }
 async function obNext(){
   obRead();
@@ -1326,15 +1352,15 @@ async function obNext(){
     const age = num(ob.age), lb = num(ob.lb), ft = num(ob.ft), inch = num(ob.inch);
     if (age && age < 18) return toast('This calculator is for adults 18+. Please ask a doctor about targets for teens.');
     if (!(age >= 18 && age <= 100)) return toast('Enter your age');
-    if (!(lb >= 70 && lb <= 700)) return toast('Enter your weight in pounds');
-    if (!(ft >= 3 && ft <= 8) || inch < 0 || inch >= 12) return toast('Enter your height in feet and inches');
+    if (!(lb >= 70 && lb <= 700)) return toast(`Enter your weight in ${metric() ? 'kilograms' : 'pounds'}`);
+    if (!(ft >= 3 && ft <= 8) || inch < 0 || inch >= 12) return toast(metric() ? 'Enter your height in centimeters' : 'Enter your height in feet and inches');
     Object.assign(ob, {age, lb, ft, inch});
   }
   if (ob.step === 4) { const gl = num(ob.goalLb); ob.goalLb = gl > 0 && gl < ob.lb ? gl : ''; }
   if (ob.step === 5) {
     for (const k of ['cal','p','c','f']) S[k] = r0($('#ob_'+k).value) || S[k];
-    const {first, step, ...profile} = ob; S.profile = profile; S.setupDone = true; await saveSettings();
-    const t = todayStr(); if (!(await idb.get('weights', t))) await idb.put('weights', {date:t, lb:r1(ob.lb)});
+    const {first, step, units, ...profile} = ob; S.profile = profile; S.setupDone = true; await saveSettings();
+    const t = todayStr(); if (!(await idb.get('weights', t))) await idb.put('weights', {date:t, lb:Math.round(ob.lb * 100) / 100});
     if (!ob.first) { ob = null; closeSheet(); toast('Targets saved'); return refresh(); }
   }
   ob.step++; renderSetup();
@@ -1352,11 +1378,14 @@ function renderSettings(){
     <label>API key<input id="ai_key" type="password" autocomplete="off" value="${esc(S.apiKey)}" placeholder="sk-ant-…"></label>
     <label>Model<input id="ai_model" value="${esc(S.model)}"></label>
     <div class="btns"><button id="ai_test">Test connection</button><button class="primary" id="ai_save">Save</button></div></div>
-  <div class="card"><h2>Time format</h2>
+  <div class="card"><h2>Units and time</h2>
+    <label>Measurements<select id="un_sel">
+      <option value="imperial" ${!metric() ? 'selected' : ''}>Imperial (lb, ft/in, oz, fl oz)</option>
+      <option value="metric" ${metric() ? 'selected' : ''}>Metric (kg, cm, g, ml)</option></select></label>
     <label>Show times as<select id="tf_sel">
       <option value="12" ${S.timeFmt !== '24' ? 'selected' : ''}>12-hour (7:15 PM)</option>
       <option value="24" ${S.timeFmt === '24' ? 'selected' : ''}>24-hour (19:15)</option></select></label>
-    <p class="hint">Used for every time shown in the app and for typing times when you log or edit food.</p></div>
+    <p class="hint">Used throughout the app: body weight, height, food amounts, and the times you log or edit food. Food nutrition is always in grams.</p></div>
   <div class="card"><h2>Backup</h2>
     <p class="hint">Your log lives only on this phone. Export a backup now and then, and import it if you switch phones.</p>
     <div class="btns"><button id="ex_go">Export backup</button><button id="im_go">Import backup</button></div></div>
@@ -1393,6 +1422,7 @@ function renderSettings(){
     try { await callClaude('Reply with OK.', 10); await saveSettings(); toast('Connected. Key saved.'); }
     catch (e) { toast(e instanceof NetErr ? 'No connection right now' : 'Failed: ' + e.message); }
   };
+  $('#un_sel').onchange = async ev => { S.units = ev.target.value; await saveSettings(); toast('Units saved'); renderSettings(); };
   $('#tf_sel').onchange = async ev => { S.timeFmt = ev.target.value; await saveSettings(); toast('Time format saved'); renderSettings(); };
   $('#ex_go').onclick = exportData;
   $('#im_go').onclick = () => $('#importInput').click();
@@ -1521,7 +1551,7 @@ document.addEventListener('click', ev => {
     case 'scan': scanSheet(); break;
     case 'manual': manualSheet(); break;
     case 'describe': describeSheet(); break;
-    case 'obset': if (ob) { obRead(); ob[d.f] = isNaN(+d.v) ? d.v : +d.v; if (d.f === 'goal') { ob.pace = d.v === 'lose' ? 1 : d.v === 'gain' ? 250 : 0; ob.pf = PF_DEFAULT[d.v]; } renderSetup(); } break;
+    case 'obset': if (ob) { obRead(); if (d.f === 'units') { S.units = d.v; saveSettings(); if (ob.goal === 'lose') ob.pace = nearestPace(ob.pace); } ob[d.f] = isNaN(+d.v) ? d.v : +d.v; if (d.f === 'goal') { ob.pace = d.v === 'lose' ? PACE.lose[1][0] : d.v === 'gain' ? 250 : 0; ob.pf = PF_DEFAULT[d.v]; } renderSetup(); } break;
     case 'obnext': if (ob) obNext(); break;
     case 'obback': if (ob) { obRead(); ob.step--; renderSetup(); } break;
     case 'obskip': if (ob) { S.setupDone = true; saveSettings(); ob = null; closeSheet(); showTab('settings'); toast('Enter your targets here anytime'); } break;

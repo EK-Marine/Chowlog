@@ -122,7 +122,8 @@ h3.hrow{display:flex;align-items:center;justify-content:space-between}
 .chip.on{background:var(--field);color:var(--headink);border-color:var(--field)}
 .actions{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
 .act{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 6px 12px;display:flex;flex-direction:column;align-items:center;gap:2px;font-weight:650}
-.act span{font-size:26px;line-height:1.2}
+.act span{font-size:26px;line-height:1.2;display:flex;align-items:center;justify-content:center;height:32px}
+.gi{width:1.15em;height:1.15em;display:block}
 .act small{font-weight:400;color:var(--mute);font-size:12px}
 .act.primary-act{background:var(--field);color:var(--headink);border-color:var(--field)}
 .act.wide{grid-column:1 / -1;flex-direction:row;justify-content:center;gap:10px;padding:12px}
@@ -134,6 +135,12 @@ h3.hrow{display:flex;align-items:center;justify-content:space-between}
 .srow{display:flex;gap:8px;margin-bottom:6px}.srow input{flex:1;margin:0}
 .srow button{padding:0 16px;border-radius:var(--r-sm);border:0;background:var(--field);color:var(--headink);font-weight:600}
 .tin{display:flex;gap:6px;margin-top:4px}.tin input{flex:1;margin:0}.tin select{width:auto;margin:0}
+.privacy details{border-top:1px solid var(--line);padding:10px 0}
+.privacy summary{font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between}
+.privacy summary::-webkit-details-marker{display:none}
+.privacy summary::after{content:'▾';color:var(--mute)}.privacy details[open] summary::after{content:'▴'}
+.privacy p,.privacy li{font-size:14px;color:var(--mute);margin:8px 0 0}
+.privacy ul{margin:4px 0 0;padding-left:18px}.privacy li b{color:var(--ink)}
 .pick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:4px 0 8px}
 .act.primary-act small{color:var(--headink);opacity:.7}
 
@@ -364,7 +371,9 @@ const saveSettings = () => idb.put('kv', {k:'settings', v:S});
 const MEALS = ['breakfast','snack_am','lunch','snack_pm','dinner','snack_eve'];
 const MEAL_LABEL = {breakfast:'Breakfast', snack_am:'Morning snack', lunch:'Lunch', snack_pm:'Afternoon snack', dinner:'Dinner', snack_eve:'Evening snack'};
 const SNACKS = new Set(['snack_am','snack_pm','snack_eve']);
-const ICON = {manual:'✎', barcode:'▦', ai:'◉', fav:'★', label:'▥', text:'Aa', search:'⌕', recipe:'♨'};
+const CAMERA_SVG = '<svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4.5 7h3l1.7-2.5h5.6L16.5 7h3a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/><circle cx="12" cy="13.5" r="3.8"/></g><circle cx="18.2" cy="10" r="1" fill="currentColor"/></svg>';
+const BARCODE_SVG = '<svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 7V4.5a2 2 0 0 1 2-2H7M17 2.5h2.5a2 2 0 0 1 2 2V7M21.5 17v2.5a2 2 0 0 1-2 2H17M7 21.5H4.5a2 2 0 0 1-2-2V17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><g fill="currentColor"><rect x="5.5" y="6.5" width="1.4" height="11"/><rect x="8" y="6.5" width="0.8" height="11"/><rect x="9.8" y="6.5" width="2" height="11"/><rect x="12.8" y="6.5" width="0.8" height="11"/><rect x="14.5" y="6.5" width="1.4" height="11"/><rect x="16.8" y="6.5" width="0.8" height="11"/><rect x="18" y="6.5" width="0.6" height="11"/></g></svg>', LABEL_SVG = '<svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="2" width="15" height="20" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="7" y="4.6" width="8" height="2.2" rx=".4" fill="currentColor"/><g stroke="currentColor" stroke-linecap="round"><path d="M7 9.2h10" stroke-width="2"/><path d="M7 12h5.5M14.5 12H17M7 14.6h4.5M14.5 14.6H17M7 17.2h6M14.5 17.2H17" stroke-width="1.2"/><path d="M7 19.6h10" stroke-width="1.4"/></g></svg>';
+const ICON = {manual:'✎', barcode:BARCODE_SVG, ai:CAMERA_SVG, fav:'★', label:LABEL_SVG, text:'Aa', search:'⌕', recipe:'♨'};
 // Breakfast 04:00–08:59 · Morning snack 09:00–10:29 · Lunch 10:30–13:29 · Afternoon snack 13:30–16:59 · Dinner 17:00–20:59 · Evening snack 21:00–03:59
 function mealForTime(t){
   const [H, M] = String(t).split(':').map(Number), m = H*60 + (M || 0);
@@ -508,11 +517,11 @@ async function renderAdd(){
     ${timeInput('lw_time', 'Time eaten', logTime || hhmm(new Date()))}</div>
   ${logTime || logDate ? `<p class="when-note">Logging for ${logDate ? shortD(logDate) : 'today'} at ${fmtTime(logTime || hhmm(new Date()))}. <button class="link" id="lw_now" style="padding:0">Reset to now</button></p>` : ''}
   <div class="actions">
-    <button class="act primary-act" data-act="photo"><span>◉</span>Photo<small>AI estimate</small></button>
+    <button class="act primary-act" data-act="photo"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4.5 7h3l1.7-2.5h5.6L16.5 7h3a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/><circle cx="12" cy="13.5" r="3.8"/></g><circle cx="18.2" cy="10" r="1" fill="currentColor"/></svg></span>Photo<small>AI estimate</small></button>
     <button class="act primary-act" data-act="describe"><span>Aa</span>Describe<small>Type what you ate</small></button>
-    <button class="act" data-act="scan"><span>▦</span>Barcode<small>Scan or type</small></button>
+    <button class="act" data-act="scan"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 7V4.5a2 2 0 0 1 2-2H7M17 2.5h2.5a2 2 0 0 1 2 2V7M21.5 17v2.5a2 2 0 0 1-2 2H17M7 21.5H4.5a2 2 0 0 1-2-2V17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><g fill="currentColor"><rect x="5.5" y="6.5" width="1.4" height="11"/><rect x="8" y="6.5" width="0.8" height="11"/><rect x="9.8" y="6.5" width="2" height="11"/><rect x="12.8" y="6.5" width="0.8" height="11"/><rect x="14.5" y="6.5" width="1.4" height="11"/><rect x="16.8" y="6.5" width="0.8" height="11"/><rect x="18" y="6.5" width="0.6" height="11"/></g></svg></span>Barcode<small>Scan or type</small></button>
     <button class="act" data-act="search"><span>⌕</span>Search<small>Food database</small></button>
-    <button class="act" data-act="label"><span>▥</span>Label<small>Read Nutrition Facts</small></button>
+    <button class="act" data-act="label"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="2" width="15" height="20" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="7" y="4.6" width="8" height="2.2" rx=".4" fill="currentColor"/><g stroke="currentColor" stroke-linecap="round"><path d="M7 9.2h10" stroke-width="2"/><path d="M7 12h5.5M14.5 12H17M7 14.6h4.5M14.5 14.6H17M7 17.2h6M14.5 17.2H17" stroke-width="1.2"/><path d="M7 19.6h10" stroke-width="1.4"/></g></svg></span>Label<small>Read Nutrition Facts</small></button>
     <button class="act" data-act="manual"><span>✎</span>Manual<small>Enter values</small></button>
   </div>
   <h3 class="hrow">Favorites, meals and recipes <span><button class="mini" data-act="newmeal">+ Meal</button> <button class="mini" data-act="newrecipe">+ Recipe</button></span></h3>`;
@@ -560,11 +569,11 @@ async function renderBuilder(){
     : `<div class="empty">Add ${rec ? 'ingredients' : 'items'} with the buttons below. Swipe one left to remove it, or tap it to adjust.</div>`;
   h += `<div class="btns sticky"><button id="b_cancel">Cancel</button><button id="b_save">Save meal</button><button class="primary" id="b_log">Save and log</button></div>
   <h3>Add an item</h3><div class="actions">
-    <button class="act" data-act="photo"><span>◉</span>Photo</button>
+    <button class="act" data-act="photo"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4.5 7h3l1.7-2.5h5.6L16.5 7h3a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/><circle cx="12" cy="13.5" r="3.8"/></g><circle cx="18.2" cy="10" r="1" fill="currentColor"/></svg></span>Photo</button>
     <button class="act" data-act="describe"><span>Aa</span>Describe</button>
-    <button class="act" data-act="scan"><span>▦</span>Barcode</button>
+    <button class="act" data-act="scan"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 7V4.5a2 2 0 0 1 2-2H7M17 2.5h2.5a2 2 0 0 1 2 2V7M21.5 17v2.5a2 2 0 0 1-2 2H17M7 21.5H4.5a2 2 0 0 1-2-2V17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><g fill="currentColor"><rect x="5.5" y="6.5" width="1.4" height="11"/><rect x="8" y="6.5" width="0.8" height="11"/><rect x="9.8" y="6.5" width="2" height="11"/><rect x="12.8" y="6.5" width="0.8" height="11"/><rect x="14.5" y="6.5" width="1.4" height="11"/><rect x="16.8" y="6.5" width="0.8" height="11"/><rect x="18" y="6.5" width="0.6" height="11"/></g></svg></span>Barcode</button>
     <button class="act" data-act="search"><span>⌕</span>Search</button>
-    <button class="act" data-act="label"><span>▥</span>Label</button>
+    <button class="act" data-act="label"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="2" width="15" height="20" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="7" y="4.6" width="8" height="2.2" rx=".4" fill="currentColor"/><g stroke="currentColor" stroke-linecap="round"><path d="M7 9.2h10" stroke-width="2"/><path d="M7 12h5.5M14.5 12H17M7 14.6h4.5M14.5 14.6H17M7 17.2h6M14.5 17.2H17" stroke-width="1.2"/><path d="M7 19.6h10" stroke-width="1.4"/></g></svg></span>Label</button>
     <button class="act" data-act="manual"><span>✎</span>Manual</button></div>
   <p class="hint">Photos, labels and descriptions need a connection while you build. Favorites, recent foods and barcodes you've scanned before work offline.</p>
   <h3>Favorites and saved meals</h3>` + favList(favs, false) + recentList();
@@ -789,8 +798,8 @@ let photoMode = {type:'meal'};
 function scanLabelFor(code){ choosePhoto({type:'label', code}); }
 function choosePhoto(mode){
   sheet(`<h2>${mode.type === 'label' ? 'Nutrition label' : 'Meal photo'}</h2>
-    <div class="pick"><button class="act primary-act" id="pk_cam"><span>◉</span>Take a photo</button>
-    <button class="act" id="pk_gal"><span>▣</span>Choose from gallery</button></div>
+    <div class="pick"><button class="act primary-act" id="pk_cam"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4.5 7h3l1.7-2.5h5.6L16.5 7h3a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/><circle cx="12" cy="13.5" r="3.8"/></g><circle cx="18.2" cy="10" r="1" fill="currentColor"/></svg></span>Take a photo</button>
+    <button class="act" id="pk_gal"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><rect x="2.5" y="4" width="19" height="16" rx="2"/><path d="M3.5 18l5.5-5.5 4 4 2.5-2.5 5 5"/></g><circle cx="15.5" cy="9" r="1.7" fill="currentColor"/></svg></span>Choose from gallery</button></div>
     <div class="btns"><button data-act="close">Cancel</button></div>`);
   $('#pk_cam').onclick = () => { closeSheet(); photoMode = {...mode, gallery:false}; $('#photoInput').click(); };
   $('#pk_gal').onclick = () => { closeSheet(); photoMode = {...mode, gallery:true}; $('#galleryInput').click(); };
@@ -992,7 +1001,7 @@ function searchSheet(){
 }
 function prodRow(p, src, i){
   const img = p.thumb || p.image;
-  return `<button class="row" data-act="pickprod" data-src="${src}" data-i="${i}">${img ? `<img src="${img}" alt="" onerror="this.style.visibility='hidden'">` : `<div class="ic">▦</div>`}
+  return `<button class="row" data-act="pickprod" data-src="${src}" data-i="${i}">${img ? `<img src="${img}" alt="" onerror="this.style.visibility='hidden'">` : `<div class="ic">${BARCODE_SVG}</div>`}
     <div class="rm"><div class="rn">${esc(p.name)}</div><div class="rd">${r0(p.serving.cal)} cal per ${esc(p.serving.label)}</div></div></button>`;
 }
 async function runSearch(q){
@@ -1209,6 +1218,26 @@ function renderSettings(){
   <div class="card"><h2>Backup</h2>
     <p class="hint">Your log lives only on this phone. Export a backup now and then, and import it if you switch phones.</p>
     <div class="btns"><button id="ex_go">Export backup</button><button id="im_go">Import backup</button></div></div>
+  <div class="card privacy"><h2>Your privacy</h2>
+    <p class="hint">ChowLog is built to keep your information with you.</p>
+    <details open><summary>Your food log stays on this phone</summary>
+      <p>Everything you log, your favorites, recipes, weight and settings are stored only on this device. There's no ChowLog account and no ChowLog server collecting your data.</p></details>
+    <details><summary>Photos are scrubbed before use</summary>
+      <p>When you take or choose a photo, ChowLog makes a clean copy that contains only the picture. Your location (GPS), camera details and other hidden photo data are removed before the photo is saved or sent anywhere. For gallery photos, only the date it was taken is read, to offer logging it at that time, and that date is never sent.</p></details>
+    <details><summary>What leaves your phone, and why</summary>
+      <ul>
+        <li><b>Anthropic (Claude):</b> the scrubbed meal or label photo, or the description you typed, to estimate nutrition. Nothing else from your log is included.</li>
+        <li><b>Open Food Facts:</b> the barcode number or the words you search for, to look up a product.</li>
+        <li><b>Wikipedia:</b> a short generic food name like "chicken salad," to find a stock photo for described foods.</li>
+        <li><b>GitHub</b> (where the app is hosted): the normal web request made when the app loads or updates.</li>
+      </ul></details>
+    <details><summary>No ads, tracking or analytics</summary>
+      <p>ChowLog has no ads, no analytics, no tracking cookies and no third-party trackers. It doesn't know who you are.</p></details>
+    <details><summary>Your API key</summary>
+      <p>Your key is stored only on this phone, is sent only to Anthropic with your requests, and is left out of backups.</p></details>
+    <details><summary>You're in control</summary>
+      <p>Backups are files you save and keep yourself. You can delete any item with a swipe, and "Erase all data" below removes everything ChowLog has stored on this phone.</p></details>
+  </div>
   <div class="card"><h2>Erase</h2><div class="btns"><button class="danger" id="wipe">Erase all data</button></div></div>`;
   const chk = () => { const k = 4*num($('#t_p').value) + 4*num($('#t_c').value) + 9*num($('#t_f').value); $('#t_chk').textContent = `Your macros add up to ${r0(k).toLocaleString()} calories.`; };
   ['t_p','t_c','t_f'].forEach(id => $('#'+id).oninput = chk); chk();

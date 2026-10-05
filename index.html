@@ -146,6 +146,7 @@ h3.hrow{display:flex;align-items:center;justify-content:space-between}
 .opt b{display:block;font-size:15px}.opt small{color:var(--mute);font-size:13px}
 .opt.on{border-color:var(--field);box-shadow:inset 0 0 0 1px var(--field);background:var(--chip)}
 .seg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}.seg .opt{text-align:center}
+.seg5{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}.seg5 .opt{text-align:center;padding:9px 2px}
 .seg4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.seg4 .opt{text-align:center;padding:9px 4px}.seg4 .opt small{font-size:11px}
 .why{border:1px solid var(--line);border-radius:var(--r-sm);padding:10px 12px;margin:8px 0 12px}
 .why summary{font-weight:600;cursor:pointer}.why p{font-size:14px;color:var(--mute);margin:8px 0 0}
@@ -1210,12 +1211,19 @@ async function renderTrends(){
 }
 
 /* ---------- Goal setup (first run, or Settings → Estimate my targets) ---------- */
-const ACT = {
-  sed:{l:'Mostly sitting', d:'Desk job, little exercise', f:1.2},
-  light:{l:'Lightly active', d:'Walks or light exercise 1–3 days/week', f:1.375},
-  mod:{l:'Moderately active', d:'Exercise 3–5 days/week', f:1.55},
-  very:{l:'Very active', d:'Hard exercise 6–7 days/week', f:1.725},
-  ext:{l:'Extremely active', d:'Physical job plus hard training', f:1.9}};
+// Daily life (job/lifestyle) sets the base multiplier; workouts are added on top as calories burned.
+const LIFE = {
+  sit:{l:'Mostly sitting', d:'Desk or office work, driving, studying', f:1.2},
+  feet:{l:'On your feet', d:'Teaching, retail, nursing, lots of walking', f:1.35},
+  phys:{l:'Physical work', d:'Warehouse, trades, landscaping, delivery', f:1.5},
+  heavy:{l:'Heavy labor', d:'Construction, farming, field training', f:1.7}};
+const WFREQ = [[0,'None'],[1.5,'1–2'],[3.5,'3–4'],[5.5,'5–6'],[7,'Daily']]; // workouts per week
+const WTYPE = { // net METs above resting
+  strength:{l:'Strength training', d:'Weights, machines, bodyweight', m:4},
+  cardio:{l:'Cardio', d:'Running, cycling, rowing, swimming', m:6},
+  mixed:{l:'Mixed or sports', d:'HIIT, CrossFit, team sports, martial arts', m:5.5},
+  light:{l:'Light', d:'Walking, yoga, easy cycling', m:2.5}};
+const WMIN = [30, 45, 60, 90];
 const GOALS = {
   lose:{l:'Lose fat', d:'Calorie deficit, high protein to keep muscle'},
   recomp:{l:'Lose fat and build muscle', d:'Small deficit, high protein, lift weights'},
@@ -1229,7 +1237,8 @@ const PF_OPTS = [[0.8,'0.8','Standard'],[1,'1.0','Active'],[1.2,'1.2','High'],[1
 // Mifflin-St Jeor BMR × activity, then adjusted for the goal, with safety floors.
 function calcTargets(o){
   const kg = o.lb * 0.453592, cm = (o.ft * 12 + o.inch) * 2.54;
-  const bmr = 10*kg + 6.25*cm - 5*o.age + (o.sex === 'm' ? 5 : -161), tdee = bmr * ACT[o.act].f;
+  const bmr = 10*kg + 6.25*cm - 5*o.age + (o.sex === 'm' ? 5 : -161);
+  const life = bmr * LIFE[o.life].f, ex = o.wfreq ? WTYPE[o.wtype].m * kg * (o.wmin / 60) * o.wfreq / 7 : 0, tdee = life + ex;
   let cal = tdee, notes = [], lbwk = 0;
   if (o.goal === 'lose') {
     lbwk = Math.min(o.pace, o.lb * 0.01);
@@ -1244,11 +1253,13 @@ function calcTargets(o){
   const p = Math.round(ref * (o.pf || PF_DEFAULT[o.goal]));
   const f = Math.round(Math.max(cal * 0.28 / 9, o.lb * 0.3));
   const c = Math.max(0, Math.round((cal - p*4 - f*9) / 4));
-  return {cal, p, c, f, bmr:Math.round(bmr), tdee:Math.round(tdee / 10) * 10, lbwk, notes};
+  return {cal, p, c, f, bmr:Math.round(bmr), tdee:Math.round(tdee / 10) * 10, life:Math.round(life / 10) * 10, ex:Math.round(ex / 10) * 10, lbwk, notes};
 }
 let ob = null;
 function openSetup(first){
-  ob = {first, step:first ? 0 : 1, sex:'m', age:'', ft:'', inch:'', lb:'', goalLb:'', act:'mod', goal:'lose', pace:1, ...(S.profile || {})};
+  ob = {first, step:first ? 0 : 1, sex:'m', age:'', ft:'', inch:'', lb:'', goalLb:'', life:'sit', wfreq:3.5, wtype:'strength', wmin:60, goal:'lose', pace:1, ...(S.profile || {})};
+  if (ob.act && !S.profile?.life) { // older single activity question → split into daily life + workouts
+    ob.wfreq = {sed:0, light:1.5, mod:3.5, very:5.5, ext:5.5}[ob.act] ?? 3.5; if (ob.act === 'ext') ob.life = 'phys'; delete ob.act; }
   if (!ob.pf) ob.pf = PF_DEFAULT[ob.goal];
   if (!ob.lb) { /* prefill weight from the latest weigh-in */ idb.all('weights').then(ws => { const w = ws.sort((a,b) => a.date < b.date ? -1 : 1).pop(); if (w && ob && !ob.lb) { ob.lb = w.lb; renderSetup(); } }); }
   renderSetup();
@@ -1257,7 +1268,7 @@ function obChoice(field, val, title, sub){
   return `<button class="opt ${ob[field] == val ? 'on' : ''}" data-act="obset" data-f="${field}" data-v="${val}"><b>${title}</b>${sub ? `<small>${sub}</small>` : ''}</button>`;
 }
 function renderSetup(){
-  const s = ob.step, dots = `<div class="obdots">${[1,2,3,4].map(i => `<i class="${i <= s ? 'on' : ''}"></i>`).join('')}</div>`;
+  const s = ob.step, dots = `<div class="obdots">${[1,2,3,4,5].map(i => `<i class="${i <= s ? 'on' : ''}"></i>`).join('')}</div>`;
   const nav = (back, next, label = 'Next') => `<div class="btns">${back ? '<button data-act="obback">Back</button>' : ''}<button class="primary" data-act="obnext">${label}</button></div>`;
   let h = '';
   if (s === 0) h = `<h2>Welcome to ChowLog</h2>
@@ -1269,18 +1280,24 @@ function renderSetup(){
     <div class="grid4"><label>Age<input id="ob_age" inputmode="numeric" value="${ob.age}"></label><label>Weight (lb)<input id="ob_lb" inputmode="decimal" value="${ob.lb}"></label></div>
     <div class="grid4"><label>Height (ft)<input id="ob_ft" inputmode="numeric" value="${ob.ft}"></label><label>(in)<input id="ob_in" inputmode="numeric" value="${ob.inch}"></label></div>
     ${nav(!ob.first ? false : true)}`;
-  else if (s === 2) h = `${dots}<h2>How active are you?</h2><p class="hint">Count workouts and how much you move at work. If you're between two, pick the lower one.</p>
-    <div class="opts">${Object.entries(ACT).map(([k,a]) => obChoice('act', k, a.l, a.d)).join('')}</div>${nav(true)}`;
-  else if (s === 3) h = `${dots}<h2>What's your goal?</h2>
+  else if (s === 2) h = `${dots}<h2>Your daily activity</h2><p class="hint">Your job and normal day, not counting workouts. If you're between two, pick the lower one.</p>
+    <div class="opts">${Object.entries(LIFE).map(([k,a]) => obChoice('life', k, a.l, a.d)).join('')}</div>${nav(true)}`;
+  else if (s === 3) h = `${dots}<h2>Your workouts</h2>
+    <h3 style="margin:4px 2px 6px">Workouts per week</h3><div class="seg5">${WFREQ.map(([v,t]) => obChoice('wfreq', v, t)).join('')}</div>
+    ${ob.wfreq ? `<h3 style="margin:14px 2px 6px">Main type</h3><p class="hint" style="margin-top:0">Pick what you do most.</p>
+      <div class="opts">${Object.entries(WTYPE).map(([k,t]) => obChoice('wtype', k, t.l, t.d)).join('')}</div>
+      <h3 style="margin:14px 2px 6px">Typical session</h3><div class="seg4">${WMIN.map(m => obChoice('wmin', m, m + ' min')).join('')}</div>` : ''}
+    ${nav(true)}`;
+  else if (s === 4) h = `${dots}<h2>What's your goal?</h2>
     <div class="opts">${Object.entries(GOALS).map(([k,g]) => obChoice('goal', k, g.l, g.d)).join('')}</div>
     ${PACE[ob.goal] ? `<h3 style="margin:14px 2px 6px">Pace</h3><div class="opts">${PACE[ob.goal].map(([v,t,d]) => obChoice('pace', v, t, d)).join('')}</div>` : ''}
     ${ob.goal === 'lose' || ob.goal === 'recomp' ? `<label style="margin-top:10px">Goal weight (lb, optional)<input id="ob_goal" inputmode="decimal" value="${ob.goalLb}"></label>` : ''}
     ${nav(true, true, 'See my targets')}`;
-  else if (s === 4) {
+  else if (s === 5) {
     const r = calcTargets(ob), diff = r.cal - r.tdee;
     h = `${dots}<h2>Your daily targets</h2>
       <div class="obres"><span>${r.cal.toLocaleString()}</span><small>calories per day</small></div>
-      <p class="hint">Maintenance is about ${r.tdee.toLocaleString()} cal/day. ${diff < 0 ? `This is ${Math.abs(diff).toLocaleString()} below it${ob.goal === 'lose' ? `, about ${r1(r.lbwk)} lb of loss per week` : ''}.` : diff > 0 ? `This is ${diff.toLocaleString()} above it for steady muscle gain alongside strength training.` : 'This holds your weight steady.'}</p>
+      <p class="hint">Maintenance is about ${r.tdee.toLocaleString()} cal/day${r.ex ? ` (${r.life.toLocaleString()} from daily life + ${r.ex.toLocaleString()} from workouts, averaged over the week)` : ''}. ${diff < 0 ? `This is ${Math.abs(diff).toLocaleString()} below it${ob.goal === 'lose' ? `, about ${r1(r.lbwk)} lb of loss per week` : ''}.` : diff > 0 ? `This is ${diff.toLocaleString()} above it for steady muscle gain alongside strength training.` : 'This holds your weight steady.'}</p>
       ${r.notes.map(n => `<p class="hint" style="color:var(--signal)">${esc(n)}</p>`).join('')}
       <h3 style="margin:14px 2px 6px">Protein, grams per lb of ${ob.goalLb && ob.goalLb < ob.lb ? 'goal' : 'body'} weight</h3>
       <div class="seg4">${PF_OPTS.map(([v,t,d]) => obChoice('pf', v, t + (v === PF_DEFAULT[ob.goal] ? ' ✓' : ''), d)).join('')}</div>
@@ -1291,7 +1308,7 @@ function renderSetup(){
       <div class="grid4">${numF('ob_cal','Calories',r.cal)}${numF('ob_p','Protein (g)',r.p)}${numF('ob_c','Carbs (g)',r.c)}${numF('ob_f','Fat (g)',r.f)}</div>
       <p class="hint">You can adjust these now or later in Settings. These are estimates from a standard formula (Mifflin-St Jeor); everyone's body is different, so watch your weight trend for 2–3 weeks and adjust. Check with your doctor or a dietitian before big changes, especially if you have a medical condition or are pregnant or nursing.</p>
       ${nav(true, true, 'Use these targets')}`;
-  } else if (s === 5) h = `<h2>You're all set</h2>
+  } else if (s === 6) h = `<h2>You're all set</h2>
     <p>Optional: photo, nutrition label and describe logging use Claude, which needs an Anthropic API key. You can add it now or later in Settings. Barcode, search and manual logging work without it.</p>
     <label>API key<input id="ob_key" type="password" autocomplete="off" placeholder="sk-ant-…" value="${esc(S.apiKey)}"></label>
     <p class="hint">Tip: long-press any item to edit it, and swipe left to delete.</p>
@@ -1301,7 +1318,7 @@ function renderSetup(){
 function obRead(){
   const g = id => $('#' + id) ? $('#' + id).value.trim() : undefined;
   if (ob.step === 1) { ob.age = g('ob_age'); ob.lb = g('ob_lb'); ob.ft = g('ob_ft'); ob.inch = g('ob_in') || '0'; }
-  if (ob.step === 3 && $('#ob_goal')) ob.goalLb = g('ob_goal');
+  if (ob.step === 4 && $('#ob_goal')) ob.goalLb = g('ob_goal');
 }
 async function obNext(){
   obRead();
@@ -1313,8 +1330,8 @@ async function obNext(){
     if (!(ft >= 3 && ft <= 8) || inch < 0 || inch >= 12) return toast('Enter your height in feet and inches');
     Object.assign(ob, {age, lb, ft, inch});
   }
-  if (ob.step === 3) { const gl = num(ob.goalLb); ob.goalLb = gl > 0 && gl < ob.lb ? gl : ''; }
-  if (ob.step === 4) {
+  if (ob.step === 4) { const gl = num(ob.goalLb); ob.goalLb = gl > 0 && gl < ob.lb ? gl : ''; }
+  if (ob.step === 5) {
     for (const k of ['cal','p','c','f']) S[k] = r0($('#ob_'+k).value) || S[k];
     const {first, step, ...profile} = ob; S.profile = profile; S.setupDone = true; await saveSettings();
     const t = todayStr(); if (!(await idb.get('weights', t))) await idb.put('weights', {date:t, lb:r1(ob.lb)});

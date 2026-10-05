@@ -141,6 +141,17 @@ h3.hrow{display:flex;align-items:center;justify-content:space-between}
 .privacy summary::after{content:'▾';color:var(--mute)}.privacy details[open] summary::after{content:'▴'}
 .privacy p,.privacy li{font-size:14px;color:var(--mute);margin:8px 0 0}
 .privacy ul{margin:4px 0 0;padding-left:18px}.privacy li b{color:var(--ink)}
+.opts{display:grid;gap:8px}
+.opt{text-align:left;border:1px solid var(--line);background:var(--card);border-radius:var(--r-sm);padding:11px 12px}
+.opt b{display:block;font-size:15px}.opt small{color:var(--mute);font-size:13px}
+.opt.on{border-color:var(--field);box-shadow:inset 0 0 0 1px var(--field);background:var(--chip)}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}.seg .opt{text-align:center}
+.seg4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.seg4 .opt{text-align:center;padding:9px 4px}.seg4 .opt small{font-size:11px}
+.why{border:1px solid var(--line);border-radius:var(--r-sm);padding:10px 12px;margin:8px 0 12px}
+.why summary{font-weight:600;cursor:pointer}.why p{font-size:14px;color:var(--mute);margin:8px 0 0}
+.obdots{display:flex;gap:6px;margin-bottom:12px}.obdots i{flex:1;height:4px;border-radius:2px;background:var(--line)}.obdots i.on{background:var(--coyote)}
+.obres{text-align:center;margin:6px 0 10px}.obres span{display:block;font-size:46px;font-weight:800;letter-spacing:-1px;font-variant-numeric:tabular-nums}
+.obres small{color:var(--mute)}
 .pick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:4px 0 8px}
 .act.primary-act small{color:var(--headink);opacity:.7}
 
@@ -521,7 +532,7 @@ async function renderAdd(){
     <button class="act primary-act" data-act="describe"><span>Aa</span>Describe<small>Type what you ate</small></button>
     <button class="act" data-act="scan"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 7V4.5a2 2 0 0 1 2-2H7M17 2.5h2.5a2 2 0 0 1 2 2V7M21.5 17v2.5a2 2 0 0 1-2 2H17M7 21.5H4.5a2 2 0 0 1-2-2V17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><g fill="currentColor"><rect x="5.5" y="6.5" width="1.4" height="11"/><rect x="8" y="6.5" width="0.8" height="11"/><rect x="9.8" y="6.5" width="2" height="11"/><rect x="12.8" y="6.5" width="0.8" height="11"/><rect x="14.5" y="6.5" width="1.4" height="11"/><rect x="16.8" y="6.5" width="0.8" height="11"/><rect x="18" y="6.5" width="0.6" height="11"/></g></svg></span>Barcode<small>Scan or type</small></button>
     <button class="act" data-act="search"><span>⌕</span>Search<small>Food database</small></button>
-    <button class="act" data-act="label"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="2" width="15" height="20" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="7" y="4.6" width="8" height="2.2" rx=".4" fill="currentColor"/><g stroke="currentColor" stroke-linecap="round"><path d="M7 9.2h10" stroke-width="2"/><path d="M7 12h5.5M14.5 12H17M7 14.6h4.5M14.5 14.6H17M7 17.2h6M14.5 17.2H17" stroke-width="1.2"/><path d="M7 19.6h10" stroke-width="1.4"/></g></svg></span>Label<small>Read Nutrition Facts</small></button>
+    <button class="act" data-act="label"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="2" width="15" height="20" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="7" y="4.6" width="8" height="2.2" rx=".4" fill="currentColor"/><g stroke="currentColor" stroke-linecap="round"><path d="M7 9.2h10" stroke-width="2"/><path d="M7 12h5.5M14.5 12H17M7 14.6h4.5M14.5 14.6H17M7 17.2h6M14.5 17.2H17" stroke-width="1.2"/><path d="M7 19.6h10" stroke-width="1.4"/></g></svg></span>Nutrition Label<small>Snap the panel</small></button>
     <button class="act" data-act="manual"><span>✎</span>Manual<small>Enter values</small></button>
   </div>
   <h3 class="hrow">Favorites, meals and recipes <span><button class="mini" data-act="newmeal">+ Meal</button> <button class="mini" data-act="newrecipe">+ Recipe</button></span></h3>`;
@@ -573,7 +584,7 @@ async function renderBuilder(){
     <button class="act" data-act="describe"><span>Aa</span>Describe</button>
     <button class="act" data-act="scan"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 7V4.5a2 2 0 0 1 2-2H7M17 2.5h2.5a2 2 0 0 1 2 2V7M21.5 17v2.5a2 2 0 0 1-2 2H17M7 21.5H4.5a2 2 0 0 1-2-2V17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><g fill="currentColor"><rect x="5.5" y="6.5" width="1.4" height="11"/><rect x="8" y="6.5" width="0.8" height="11"/><rect x="9.8" y="6.5" width="2" height="11"/><rect x="12.8" y="6.5" width="0.8" height="11"/><rect x="14.5" y="6.5" width="1.4" height="11"/><rect x="16.8" y="6.5" width="0.8" height="11"/><rect x="18" y="6.5" width="0.6" height="11"/></g></svg></span>Barcode</button>
     <button class="act" data-act="search"><span>⌕</span>Search</button>
-    <button class="act" data-act="label"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="2" width="15" height="20" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="7" y="4.6" width="8" height="2.2" rx=".4" fill="currentColor"/><g stroke="currentColor" stroke-linecap="round"><path d="M7 9.2h10" stroke-width="2"/><path d="M7 12h5.5M14.5 12H17M7 14.6h4.5M14.5 14.6H17M7 17.2h6M14.5 17.2H17" stroke-width="1.2"/><path d="M7 19.6h10" stroke-width="1.4"/></g></svg></span>Label</button>
+    <button class="act" data-act="label"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="2" width="15" height="20" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="7" y="4.6" width="8" height="2.2" rx=".4" fill="currentColor"/><g stroke="currentColor" stroke-linecap="round"><path d="M7 9.2h10" stroke-width="2"/><path d="M7 12h5.5M14.5 12H17M7 14.6h4.5M14.5 14.6H17M7 17.2h6M14.5 17.2H17" stroke-width="1.2"/><path d="M7 19.6h10" stroke-width="1.4"/></g></svg></span>Nutrition Label</button>
     <button class="act" data-act="manual"><span>✎</span>Manual</button></div>
   <p class="hint">Photos, labels and descriptions need a connection while you build. Favorites, recent foods and barcodes you've scanned before work offline.</p>
   <h3>Favorites and saved meals</h3>` + favList(favs, false) + recentList();
@@ -679,7 +690,7 @@ function manualSheet(pre = {}){
     <div class="grid4">${numF('m_cal','Calories',pre.cal)}${numF('m_p','Protein (g)',pre.p)}${numF('m_c','Carbs (g)',pre.c)}${numF('m_f','Fat (g)',pre.f)}</div>
     ${pre.code ? `<p class="hint">These values are saved for barcode ${esc(pre.code)} as one serving, so the next scan works offline.</p>` : ''}
     <label class="chk"><input type="checkbox" id="m_fav"> Also save as a favorite</label>
-    <div class="btns">${pre.code ? '<button id="m_lbl">Scan the label instead</button>' : '<button class="ghost" data-act="close">Cancel</button>'}<button class="primary" id="m_save">${addLabel()}</button></div>`);
+    <div class="btns">${pre.code ? '<button id="m_lbl">Scan the nutrition label instead</button>' : '<button class="ghost" data-act="close">Cancel</button>'}<button class="primary" id="m_save">${addLabel()}</button></div>`);
   if (pre.code) $('#m_lbl').onclick = () => scanLabelFor(pre.code);
   $('#m_save').onclick = async () => {
     const v = readMacros('m_');
@@ -797,7 +808,7 @@ function toJpeg(img, max, q){
 let photoMode = {type:'meal'};
 function scanLabelFor(code){ choosePhoto({type:'label', code}); }
 function choosePhoto(mode){
-  sheet(`<h2>${mode.type === 'label' ? 'Nutrition label' : 'Meal photo'}</h2>
+  sheet(`<h2>${mode.type === 'label' ? 'Nutrition Label' : 'Meal photo'}</h2>
     <div class="pick"><button class="act primary-act" id="pk_cam"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4.5 7h3l1.7-2.5h5.6L16.5 7h3a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/><circle cx="12" cy="13.5" r="3.8"/></g><circle cx="18.2" cy="10" r="1" fill="currentColor"/></svg></span>Take a photo</button>
     <button class="act" id="pk_gal"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><rect x="2.5" y="4" width="19" height="16" rx="2"/><path d="M3.5 18l5.5-5.5 4 4 2.5-2.5 5 5"/></g><circle cx="15.5" cy="9" r="1.7" fill="currentColor"/></svg></span>Choose from gallery</button></div>
     <div class="btns"><button data-act="close">Cancel</button></div>`);
@@ -1061,7 +1072,7 @@ async function handleBarcode(code){
     if (!transient(err)) { toast(err.message); return manualSheet({code}); }
     sheet(`<h2>No connection</h2><p>Barcode <b>${esc(code)}</b> isn't saved on this phone yet. Queue it and it will be looked up automatically when you reconnect.</p>
       ${amtInput('q_sv', 'Servings')}${fracChips('q_sv')}
-      <div class="btns"><button id="q_man">Enter manually</button><button id="q_lbl">Scan the label</button><button class="primary" id="q_go">Queue it</button></div>`);
+      <div class="btns"><button id="q_man">Enter manually</button><button id="q_lbl">Scan nutrition label</button><button class="primary" id="q_go">Queue it</button></div>`);
     $('#q_lbl').onclick = () => scanLabelFor(code);
     $('#q_go').onclick = async () => {
       await addEntry({name:'Barcode ' + code, cal:0, p:0, c:0, f:0, source:'barcode', status:'pending', pending:{type:'barcode', code, servings:amtOf('q_sv') || 1}});
@@ -1198,13 +1209,127 @@ async function renderTrends(){
   $('#w_go').onclick = async () => { const v = num($('#w_in').value); if (!v) return toast('Enter your weight'); await idb.put('weights', {date:end, lb:r1(v)}); toast('Weight logged'); renderTrends(); };
 }
 
+/* ---------- Goal setup (first run, or Settings → Estimate my targets) ---------- */
+const ACT = {
+  sed:{l:'Mostly sitting', d:'Desk job, little exercise', f:1.2},
+  light:{l:'Lightly active', d:'Walks or light exercise 1–3 days/week', f:1.375},
+  mod:{l:'Moderately active', d:'Exercise 3–5 days/week', f:1.55},
+  very:{l:'Very active', d:'Hard exercise 6–7 days/week', f:1.725},
+  ext:{l:'Extremely active', d:'Physical job plus hard training', f:1.9}};
+const GOALS = {
+  lose:{l:'Lose fat', d:'Calorie deficit, high protein to keep muscle'},
+  recomp:{l:'Lose fat and build muscle', d:'Small deficit, high protein, lift weights'},
+  maintain:{l:'Maintain', d:'Hold your current weight'},
+  gain:{l:'Build muscle', d:'Small surplus, high protein, lift weights'}};
+const PACE = {lose:[[0.5,'0.5 lb/week','Easiest to stick with'],[1,'1 lb/week','Steady, most common'],[1.5,'1.5 lb/week','Aggressive']],
+              gain:[[250,'Lean gain','≈ +250 cal/day, less fat gain'],[450,'Faster gain','≈ +450 cal/day, more size']]};
+// Protein in grams per lb (of goal weight when losing, otherwise body weight). Defaults follow the research; users can pick higher.
+const PF_DEFAULT = {lose:1, recomp:1, gain:1, maintain:0.8};
+const PF_OPTS = [[0.8,'0.8','Standard'],[1,'1.0','Active'],[1.2,'1.2','High'],[1.5,'1.5','Very high']];
+// Mifflin-St Jeor BMR × activity, then adjusted for the goal, with safety floors.
+function calcTargets(o){
+  const kg = o.lb * 0.453592, cm = (o.ft * 12 + o.inch) * 2.54;
+  const bmr = 10*kg + 6.25*cm - 5*o.age + (o.sex === 'm' ? 5 : -161), tdee = bmr * ACT[o.act].f;
+  let cal = tdee, notes = [], lbwk = 0;
+  if (o.goal === 'lose') {
+    lbwk = Math.min(o.pace, o.lb * 0.01);
+    if (lbwk < o.pace) notes.push(`Pace capped at ${r1(lbwk)} lb/week (about 1% of body weight), the safe upper limit.`);
+    cal = tdee - lbwk * 500;
+  } else if (o.goal === 'recomp') cal = tdee * 0.9;
+  else if (o.goal === 'gain') cal = tdee + o.pace;
+  const floor = Math.max(o.sex === 'm' ? 1500 : 1200, bmr);
+  if (cal < floor) { cal = floor; notes = ['Raised to a safe minimum. Going lower risks muscle loss and is hard to sustain.' + (o.goal === 'lose' ? ' To lose faster, add activity rather than eating less.' : '')]; if (o.goal === 'lose') lbwk = Math.max(0, (tdee - cal) / 500); }
+  cal = Math.round(cal / 10) * 10;
+  const ref = o.goalLb && o.goalLb < o.lb ? o.goalLb : o.lb; // protein from goal weight when losing a lot
+  const p = Math.round(ref * (o.pf || PF_DEFAULT[o.goal]));
+  const f = Math.round(Math.max(cal * 0.28 / 9, o.lb * 0.3));
+  const c = Math.max(0, Math.round((cal - p*4 - f*9) / 4));
+  return {cal, p, c, f, bmr:Math.round(bmr), tdee:Math.round(tdee / 10) * 10, lbwk, notes};
+}
+let ob = null;
+function openSetup(first){
+  ob = {first, step:first ? 0 : 1, sex:'m', age:'', ft:'', inch:'', lb:'', goalLb:'', act:'mod', goal:'lose', pace:1, ...(S.profile || {})};
+  if (!ob.pf) ob.pf = PF_DEFAULT[ob.goal];
+  if (!ob.lb) { /* prefill weight from the latest weigh-in */ idb.all('weights').then(ws => { const w = ws.sort((a,b) => a.date < b.date ? -1 : 1).pop(); if (w && ob && !ob.lb) { ob.lb = w.lb; renderSetup(); } }); }
+  renderSetup();
+}
+function obChoice(field, val, title, sub){
+  return `<button class="opt ${ob[field] == val ? 'on' : ''}" data-act="obset" data-f="${field}" data-v="${val}"><b>${title}</b>${sub ? `<small>${sub}</small>` : ''}</button>`;
+}
+function renderSetup(){
+  const s = ob.step, dots = `<div class="obdots">${[1,2,3,4].map(i => `<i class="${i <= s ? 'on' : ''}"></i>`).join('')}</div>`;
+  const nav = (back, next, label = 'Next') => `<div class="btns">${back ? '<button data-act="obback">Back</button>' : ''}<button class="primary" data-act="obnext">${label}</button></div>`;
+  let h = '';
+  if (s === 0) h = `<h2>Welcome to ChowLog</h2>
+    <p>Log food by photo, barcode, nutrition label, search or a quick description. It works even with no signal, and your log stays on your phone.</p>
+    <p>First, let's set your daily calorie and protein targets. It takes about a minute.</p>
+    <div class="btns"><button data-act="obskip">I'll set them myself</button><button class="primary" data-act="obnext">Estimate my targets</button></div>`;
+  else if (s === 1) h = `${dots}<h2>About you</h2><p class="hint">Used only to estimate your calorie needs. Stays on this phone.</p>
+    <div class="seg">${obChoice('sex','m','Male')}${obChoice('sex','f','Female')}</div>
+    <div class="grid4"><label>Age<input id="ob_age" inputmode="numeric" value="${ob.age}"></label><label>Weight (lb)<input id="ob_lb" inputmode="decimal" value="${ob.lb}"></label></div>
+    <div class="grid4"><label>Height (ft)<input id="ob_ft" inputmode="numeric" value="${ob.ft}"></label><label>(in)<input id="ob_in" inputmode="numeric" value="${ob.inch}"></label></div>
+    ${nav(!ob.first ? false : true)}`;
+  else if (s === 2) h = `${dots}<h2>How active are you?</h2><p class="hint">Count workouts and how much you move at work. If you're between two, pick the lower one.</p>
+    <div class="opts">${Object.entries(ACT).map(([k,a]) => obChoice('act', k, a.l, a.d)).join('')}</div>${nav(true)}`;
+  else if (s === 3) h = `${dots}<h2>What's your goal?</h2>
+    <div class="opts">${Object.entries(GOALS).map(([k,g]) => obChoice('goal', k, g.l, g.d)).join('')}</div>
+    ${PACE[ob.goal] ? `<h3 style="margin:14px 2px 6px">Pace</h3><div class="opts">${PACE[ob.goal].map(([v,t,d]) => obChoice('pace', v, t, d)).join('')}</div>` : ''}
+    ${ob.goal === 'lose' || ob.goal === 'recomp' ? `<label style="margin-top:10px">Goal weight (lb, optional)<input id="ob_goal" inputmode="decimal" value="${ob.goalLb}"></label>` : ''}
+    ${nav(true, true, 'See my targets')}`;
+  else if (s === 4) {
+    const r = calcTargets(ob), diff = r.cal - r.tdee;
+    h = `${dots}<h2>Your daily targets</h2>
+      <div class="obres"><span>${r.cal.toLocaleString()}</span><small>calories per day</small></div>
+      <p class="hint">Maintenance is about ${r.tdee.toLocaleString()} cal/day. ${diff < 0 ? `This is ${Math.abs(diff).toLocaleString()} below it${ob.goal === 'lose' ? `, about ${r1(r.lbwk)} lb of loss per week` : ''}.` : diff > 0 ? `This is ${diff.toLocaleString()} above it for steady muscle gain alongside strength training.` : 'This holds your weight steady.'}</p>
+      ${r.notes.map(n => `<p class="hint" style="color:var(--signal)">${esc(n)}</p>`).join('')}
+      <h3 style="margin:14px 2px 6px">Protein, grams per lb of ${ob.goalLb && ob.goalLb < ob.lb ? 'goal' : 'body'} weight</h3>
+      <div class="seg4">${PF_OPTS.map(([v,t,d]) => obChoice('pf', v, t + (v === PF_DEFAULT[ob.goal] ? ' ✓' : ''), d)).join('')}</div>
+      <p class="hint">✓ = recommended for your goal. ${ob.pf > PF_DEFAULT[ob.goal] ? `Your pick adds ${r0((ob.pf - PF_DEFAULT[ob.goal]) * (ob.goalLb && ob.goalLb < ob.lb ? ob.goalLb : ob.lb))} g of protein a day, so carbs were lowered to stay within your calories.` : ''}</p>
+      <details class="why" ${ob.goal === 'gain' || ob.pf > PF_DEFAULT[ob.goal] ? 'open' : ''}><summary>Why not 1.5 g per lb?</summary>
+        <p>You may have heard 1.5 g per lb for building muscle. It's common gym advice, but the research doesn't support it: a review of 49 studies on people lifting weights (Morton et al., 2018) found muscle gain levels off around 0.7 g per lb, with about 1 g per lb as a generous upper limit. That's why ChowLog recommends 1 g per lb.</p>
+        <p>More protein isn't harmful for most healthy people, it just doesn't build more muscle, and it uses calories that could otherwise fuel your training. If you prefer a higher amount, pick it above. If you have kidney disease, follow your doctor's protein advice.</p></details>
+      <div class="grid4">${numF('ob_cal','Calories',r.cal)}${numF('ob_p','Protein (g)',r.p)}${numF('ob_c','Carbs (g)',r.c)}${numF('ob_f','Fat (g)',r.f)}</div>
+      <p class="hint">You can adjust these now or later in Settings. These are estimates from a standard formula (Mifflin-St Jeor); everyone's body is different, so watch your weight trend for 2–3 weeks and adjust. Check with your doctor or a dietitian before big changes, especially if you have a medical condition or are pregnant or nursing.</p>
+      ${nav(true, true, 'Use these targets')}`;
+  } else if (s === 5) h = `<h2>You're all set</h2>
+    <p>Optional: photo, nutrition label and describe logging use Claude, which needs an Anthropic API key. You can add it now or later in Settings. Barcode, search and manual logging work without it.</p>
+    <label>API key<input id="ob_key" type="password" autocomplete="off" placeholder="sk-ant-…" value="${esc(S.apiKey)}"></label>
+    <p class="hint">Tip: long-press any item to edit it, and swipe left to delete.</p>
+    <div class="btns"><button data-act="obdone">Skip for now</button><button class="primary" data-act="obdone" data-key="1">Start logging</button></div>`;
+  sheet(h, () => { if (ob?.first) { S.setupDone = true; saveSettings(); } ob = null; });
+}
+function obRead(){
+  const g = id => $('#' + id) ? $('#' + id).value.trim() : undefined;
+  if (ob.step === 1) { ob.age = g('ob_age'); ob.lb = g('ob_lb'); ob.ft = g('ob_ft'); ob.inch = g('ob_in') || '0'; }
+  if (ob.step === 3 && $('#ob_goal')) ob.goalLb = g('ob_goal');
+}
+async function obNext(){
+  obRead();
+  if (ob.step === 1) {
+    const age = num(ob.age), lb = num(ob.lb), ft = num(ob.ft), inch = num(ob.inch);
+    if (age && age < 18) return toast('This calculator is for adults 18+. Please ask a doctor about targets for teens.');
+    if (!(age >= 18 && age <= 100)) return toast('Enter your age');
+    if (!(lb >= 70 && lb <= 700)) return toast('Enter your weight in pounds');
+    if (!(ft >= 3 && ft <= 8) || inch < 0 || inch >= 12) return toast('Enter your height in feet and inches');
+    Object.assign(ob, {age, lb, ft, inch});
+  }
+  if (ob.step === 3) { const gl = num(ob.goalLb); ob.goalLb = gl > 0 && gl < ob.lb ? gl : ''; }
+  if (ob.step === 4) {
+    for (const k of ['cal','p','c','f']) S[k] = r0($('#ob_'+k).value) || S[k];
+    const {first, step, ...profile} = ob; S.profile = profile; S.setupDone = true; await saveSettings();
+    const t = todayStr(); if (!(await idb.get('weights', t))) await idb.put('weights', {date:t, lb:r1(ob.lb)});
+    if (!ob.first) { ob = null; closeSheet(); toast('Targets saved'); return refresh(); }
+  }
+  ob.step++; renderSetup();
+}
+
 /* ---------- Settings ---------- */
 function renderSettings(){
   $('#tab-settings').innerHTML = `
   <div class="card"><h2>Daily targets</h2>
     <div class="grid4">${numF('t_cal','Calories',S.cal)}${numF('t_p','Protein (g)',S.p)}${numF('t_c','Carbs (g)',S.c)}${numF('t_f','Fat (g)',S.f)}</div>
     <p class="hint" id="t_chk"></p>
-    <div class="btns"><button class="primary" id="t_save">Save targets</button></div></div>
+    <div class="btns"><button id="t_est">Estimate my targets</button><button class="primary" id="t_save">Save targets</button></div></div>
   <div class="card"><h2>AI estimates</h2>
     <p class="hint">Photos, labels and descriptions are analyzed by Claude using your own Anthropic API key. The key is stored only on this phone.</p>
     <label>API key<input id="ai_key" type="password" autocomplete="off" value="${esc(S.apiKey)}" placeholder="sk-ant-…"></label>
@@ -1241,6 +1366,7 @@ function renderSettings(){
   <div class="card"><h2>Erase</h2><div class="btns"><button class="danger" id="wipe">Erase all data</button></div></div>`;
   const chk = () => { const k = 4*num($('#t_p').value) + 4*num($('#t_c').value) + 9*num($('#t_f').value); $('#t_chk').textContent = `Your macros add up to ${r0(k).toLocaleString()} calories.`; };
   ['t_p','t_c','t_f'].forEach(id => $('#'+id).oninput = chk); chk();
+  $('#t_est').onclick = () => openSetup(false);
   $('#t_save').onclick = async () => { for (const k of ['cal','p','c','f']) S[k] = r0($('#t_'+k).value) || S[k]; await saveSettings(); toast('Targets saved'); };
   $('#ai_save').onclick = async () => { S.apiKey = $('#ai_key').value.trim(); S.model = $('#ai_model').value.trim() || DEFAULTS.model; await saveSettings(); toast('Saved'); processQueue(); };
   $('#ai_test').onclick = async () => {
@@ -1378,6 +1504,11 @@ document.addEventListener('click', ev => {
     case 'scan': scanSheet(); break;
     case 'manual': manualSheet(); break;
     case 'describe': describeSheet(); break;
+    case 'obset': if (ob) { obRead(); ob[d.f] = isNaN(+d.v) ? d.v : +d.v; if (d.f === 'goal') { ob.pace = d.v === 'lose' ? 1 : d.v === 'gain' ? 250 : 0; ob.pf = PF_DEFAULT[d.v]; } renderSetup(); } break;
+    case 'obnext': if (ob) obNext(); break;
+    case 'obback': if (ob) { obRead(); ob.step--; renderSetup(); } break;
+    case 'obskip': if (ob) { S.setupDone = true; saveSettings(); ob = null; closeSheet(); showTab('settings'); toast('Enter your targets here anytime'); } break;
+    case 'obdone': if (ob) { if (d.key && $('#ob_key').value.trim()) { S.apiKey = $('#ob_key').value.trim(); saveSettings(); } ob = null; closeSheet(); refresh(); } break;
     case 'search': searchSheet(); break;
     case 'pickprod': { const pr = searchCache[d.src]?.[+d.i]; if (pr) { if (d.src === 'remote') idb.put('products', pr); servingSheet(pr, 'search'); } break; }
     case 'frac': { const inp = $('#' + el.parentNode.dataset.for); if (inp) { inp.value = d.v; inp.dispatchEvent(new Event('input')); } break; }
@@ -1410,12 +1541,14 @@ document.addEventListener('keydown', ev => {
 });
 
 (async () => {
+  const firstRun = !(await idb.get('kv', 'settings'));
   await loadSettings();
   try { // one-time move of entries from the old single "Snacks" section into morning/afternoon/evening snacks
     for (const e of (await idb.all('entries')).filter(e => e.meal === 'snack')) { const m = mealForTime(entTime(e)); e.meal = SNACKS.has(m) ? m : {breakfast:'snack_am', lunch:'snack_pm', dinner:'snack_eve'}[m]; await idb.put('entries', e); }
   } catch {}
   try { await navigator.storage?.persist?.(); } catch {}
   showTab('today');
+  if (firstRun) openSetup(true);
   processQueue();
   if ('serviceWorker' in navigator) {
     // When a new version installs, reload once so it shows immediately instead of on the next launch.

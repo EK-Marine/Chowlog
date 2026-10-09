@@ -915,7 +915,8 @@ function toJpeg(img, max, q){
 let photoMode = {type:'meal'};
 function scanLabelFor(code){ choosePhoto({type:'label', code}); }
 function choosePhoto(mode){
-  sheet(`<h2>${mode.type === 'label' ? 'Nutrition Label' : 'Meal photo'}</h2>
+  sheet(`<h2>${mode.type === 'label' ? 'Nutrition Label' : mode.type === 'inbody' ? 'InBody result' : 'Meal photo'}</h2>
+    ${mode.type === 'inbody' ? '<p class="hint">Photograph the whole sheet flat, in good light, or choose a screenshot of the InBody app or results website.</p>' : ''}
     <div class="pick"><button class="act primary-act" id="pk_cam"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4.5 7h3l1.7-2.5h5.6L16.5 7h3a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/><circle cx="12" cy="13.5" r="3.8"/></g><circle cx="18.2" cy="10" r="1" fill="currentColor"/></svg></span>Take a photo</button>
     <button class="act" id="pk_gal"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><rect x="2.5" y="4" width="19" height="16" rx="2"/><path d="M3.5 18l5.5-5.5 4 4 2.5-2.5 5 5"/></g><circle cx="15.5" cy="9" r="1.7" fill="currentColor"/></svg></span>Choose from gallery</button></div>
     <div class="btns"><button data-act="close">Cancel</button></div>`);
@@ -953,9 +954,10 @@ $('#photoInput').onchange = async ev => {
   const mode = photoMode; photoMode = {type:'meal'};
   let full, thumb;
   // Labels need more pixels so the small print stays legible.
-  try { const img = await loadImg(file); full = toJpeg(img, mode.type === 'label' ? 1600 : 1024, mode.type === 'label' ? 0.88 : 0.8); thumb = toJpeg(img, 160, 0.7); URL.revokeObjectURL(img.src); }
+  try { const img = await loadImg(file); full = toJpeg(img, mode.type === 'inbody' ? 1568 : mode.type === 'label' ? 1600 : 1024, mode.type === 'inbody' ? 0.9 : mode.type === 'label' ? 0.88 : 0.8); thumb = toJpeg(img, 160, 0.7); URL.revokeObjectURL(img.src); }
   catch { return toast('That photo could not be read. Try again.'); }
   if (mode.type === 'label') return labelSheet(full, thumb, mode.code);
+  if (mode.type === 'inbody') return inbodyStart(full, thumb);
   const now = navigator.onLine && S.apiKey;
   // For a gallery photo, offer the time it was taken (unless a date/time was already chosen).
   let taken = null;
@@ -1063,6 +1065,116 @@ function labelSheet(full, thumb, code){
     if (builder) return; closeSheet(); toast(now ? 'Reading label…' : 'Queued for reading'); processQueue();
   };
 }
+/* ---------- InBody body-composition scans ---------- */
+let BODY = []; // scans and history points; weights stored in lb, like the weight log
+async function loadBody(){ const r = await idb.get('kv', 'body'); BODY = (r && r.v) || []; }
+const saveBody = () => idb.put('kv', {k:'body', v:BODY});
+const bodyOk = () => BODY.filter(b => b.status === 'ok').sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+// Latest adult scan with lean mass from the last 120 days: used for resting burn (Katch-McArdle, the same formula InBody uses).
+function leanScan(){
+  const cut = addDays(todayStr(), -120);
+  return bodyOk().filter(b => b.lbmLb && b.date >= cut && !b.minor && b.source === 'scan' && b.reviewed).pop() || null;
+}
+const INBODY_SYS = `You read InBody body composition result sheets (printed sheets, the InBody website, or InBody app screenshots) from photos. Report values exactly as printed; never estimate. Use null for anything not shown. Report weights in the sheet's own units and say which units it uses.
+Dates: return ISO YYYY-MM-DD. Sheets in lb usually print dates as MM.DD.YYYY (or MM.DD.YY in the history table); kg sheets often use DD.MM.YYYY or YYYY.MM.DD. Use the full test date to decide the order for the history table too.
+Respond with ONLY a JSON object, no markdown:
+{"readable":true,"device":"e.g. InBody770","test_date":"YYYY-MM-DD","test_time":"HH:MM","units":"lb|kg","sex":"m|f|null","age":0,"weight":0,"skeletal_muscle_mass":0,"body_fat_mass":0,"percent_body_fat":0,"lean_body_mass":0,"total_body_water":0,"bmr_kcal":0,"inbody_score":0,"visceral_fat":0,"visceral_fat_unit":"cm2|level","bmi":0,"ecw_tbw":0,
+"history":[{"date":"YYYY-MM-DD","weight":0,"skeletal_muscle_mass":0,"percent_body_fat":0}]}
+"history" is the Body Composition History table if present (include every column, oldest first; leave it empty if there is no history table).
+Set readable to false if this is not an InBody result or the key numbers (weight, body fat) are not legible.`;
+async function inbodyStart(full, thumb){
+  const id = uid(), scan = {id, status:'pending', created:Date.now(), thumb, source:'scan'};
+  await idb.put('photos', {id, data:full}); BODY.push(scan); await saveBody();
+  if (!navigator.onLine || !S.apiKey) { toast(S.apiKey ? 'Queued. It will be read when you reconnect.' : 'Saved. Add your API key in Settings to read it.'); return refresh(); }
+  toast('Reading your InBody sheet…');
+  try { await resolveInbody(scan); inbodyReview(id); }
+  catch (err) { if (!transient(err)) { scan.status = 'error'; scan.error = err.message; await saveBody(); toast(err.message); } else toast('No connection. It will be read when you reconnect.'); }
+  refresh();
+}
+async function resolveInbody(scan){
+  const ph = await idb.get('photos', scan.id);
+  if (!ph) throw new Error('The photo is missing. Scan the sheet again.');
+  const d = parseJSON(await callClaude([
+    {type:'image', source:{type:'base64', media_type:'image/jpeg', data:ph.data.split(',')[1]}},
+    {type:'text', text:'Read this InBody result.'}], 2500, INBODY_SYS));
+  if (d.readable === false || !num(d.weight)) throw new Error("The InBody sheet couldn't be read clearly. Retake it flat, in good light, with the whole page in view.");
+  const f = String(d.units).toLowerCase() === 'kg' ? 1 / 0.453592 : 1, w = v => num(v) ? Math.round(num(v) * f * 10) / 10 : null, n = v => num(v) || null;
+  const okDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s || '') && s <= todayStr() && s > '1990-01-01';
+  Object.assign(scan, {
+    status:'ok', reviewed:false, error:null, date:okDate(d.test_date) ? d.test_date : todayStr(), dateGuessed:!okDate(d.test_date), time:d.test_time || null,
+    device:d.device || 'InBody', sex:d.sex === 'm' || d.sex === 'f' ? d.sex : null, age:n(d.age), minor:num(d.age) > 0 && num(d.age) < 18,
+    weightLb:w(d.weight), smmLb:w(d.skeletal_muscle_mass), bfmLb:w(d.body_fat_mass), pbf:n(d.percent_body_fat), lbmLb:w(d.lean_body_mass), tbwLb:w(d.total_body_water),
+    bmr:n(d.bmr_kcal), score:n(d.inbody_score), vfa:n(d.visceral_fat), vfaUnit:d.visceral_fat_unit === 'level' ? 'level' : 'cm²', bmi:n(d.bmi), ecw:n(d.ecw_tbw),
+    hist:(Array.isArray(d.history) ? d.history : []).filter(x => okDate(x.date) && num(x.weight)).map(x => ({date:x.date, weightLb:w(x.weight), smmLb:w(x.skeletal_muscle_mass), pbf:n(x.percent_body_fat)}))});
+  scan.hist = scan.hist.filter(x => x.date !== scan.date); // the current test also appears in the history table
+  if (!scan.lbmLb && scan.weightLb && scan.bfmLb) scan.lbmLb = Math.round((scan.weightLb - scan.bfmLb) * 10) / 10;
+  if (!scan.pbf && scan.weightLb && scan.bfmLb) scan.pbf = r1(scan.bfmLb / scan.weightLb * 100);
+  await idb.del('photos', scan.id); await saveBody();
+}
+function inbodyReview(id){
+  const b = BODY.find(x => x.id === id); if (!b) return;
+  if (b.status !== 'ok') {
+    sheet(`<h2>InBody scan</h2>${b.thumb ? `<img class="prev" src="${b.thumb}" alt="">` : ''}
+      ${b.status === 'error' ? `<p class="errbox">${esc(b.error)}</p>` : `<p class="hint">Waiting to be read. It's read automatically when you're online${S.apiKey ? '' : ' and an API key is set in Settings'}.</p>`}
+      <div class="btns"><button class="danger" id="ib_del">Delete</button><button class="primary" id="ib_retry">Try now</button></div>`);
+    $('#ib_retry').onclick = async () => { b.status = 'pending'; b.error = null; await saveBody(); closeSheet(); toast(navigator.onLine ? 'Reading…' : 'Still offline. It will be read when you reconnect.'); processQueue(true); };
+  } else {
+    const u = wU(), fw = v => v == null ? '' : r1(toW(v));
+    sheet(`<h2>${b.reviewed ? 'InBody scan' : 'Check your InBody results'}</h2>
+      <p class="hint">${esc(b.device || 'InBody')}${b.score ? ` · InBody score ${b.score}` : ''}${b.vfa ? ` · visceral fat ${b.vfa} ${b.vfaUnit}` : ''}${b.ecw ? ` · ECW/TBW ${b.ecw}` : ''}${b.source === 'history' ? ' · imported from a scan history table' : ''}</p>
+      ${b.minor ? `<p class="hint warn">This scan is for someone under 18. It's saved for tracking, but ChowLog won't use it to set calorie targets.</p>` : ''}
+      ${!b.reviewed ? '<p class="hint">Compare these with your sheet and fix anything that was misread.</p>' : ''}
+      <label>Test date<input type="date" id="ib_date" value="${b.date}" max="${todayStr()}"></label>${b.dateGuessed ? '<p class="hint warn" style="margin-top:-6px">The test date wasn\'t clear, so today was used. Please check it.</p>' : ''}
+      <div class="grid4">${numF('ib_w', `Weight (${u})`, fw(b.weightLb))}${numF('ib_pbf', 'Body fat (%)', b.pbf ?? '')}
+        ${numF('ib_smm', `Skeletal muscle (${u})`, fw(b.smmLb))}${numF('ib_bfm', `Body fat mass (${u})`, fw(b.bfmLb))}
+        ${numF('ib_lbm', `Lean body mass (${u})`, fw(b.lbmLb))}${numF('ib_bmr', 'BMR (kcal)', b.bmr ?? '')}</div>
+      ${b.hist?.length ? `<label class="chk"><input type="checkbox" id="ib_hist" checked> Also import ${b.hist.length} test${b.hist.length === 1 ? '' : 's'} from the sheet's history table</label>` : ''}
+      <div class="btns"><button class="danger" id="ib_del">Delete</button><button class="primary" id="ib_save">${b.reviewed ? 'Save' : 'Looks right, save'}</button></div>`);
+    $('#ib_save').onclick = async () => {
+      const g = id => $('#' + id).value.trim(), lb = id => g(id) ? Math.round(fromW(num(g(id))) * 10) / 10 : null;
+      const date = g('ib_date'); if (!validDate(date)) return toast('Pick today or an earlier date');
+      const wl = lb('ib_w'); if (!wl) return toast('Enter the weight');
+      Object.assign(b, {date, dateGuessed:false, weightLb:wl, pbf:num(g('ib_pbf')) || null, smmLb:lb('ib_smm'), bfmLb:lb('ib_bfm'), lbmLb:lb('ib_lbm'), bmr:num(g('ib_bmr')) || null, reviewed:true});
+      await idb.put('weights', {date, lb:wl});
+      let added = 0;
+      if (b.hist?.length && $('#ib_hist')?.checked) {
+        for (const x of b.hist) {
+          if (x.date === date || BODY.some(o => o.status === 'ok' && o.date === x.date)) continue;
+          BODY.push({id:uid(), status:'ok', reviewed:true, source:'history', date:x.date, weightLb:x.weightLb, smmLb:x.smmLb, pbf:x.pbf,
+            bfmLb:x.pbf && x.weightLb ? Math.round(x.weightLb * x.pbf) / 100 : null, minor:b.minor, device:b.device});
+          if (!(await idb.get('weights', x.date))) await idb.put('weights', {date:x.date, lb:x.weightLb});
+          added++;
+        }
+      }
+      delete b.hist; await saveBody(); closeSheet(); toast(added ? `InBody scan saved, plus ${added} earlier tests` : 'InBody scan saved'); refresh();
+    };
+  }
+  $('#ib_del').onclick = async () => {
+    if (!confirm('Delete this InBody scan?')) return;
+    BODY = BODY.filter(x => x.id !== id); await idb.del('photos', id); await saveBody(); closeSheet(); toast('Scan deleted'); refresh();
+  };
+}
+function bodyCard(){
+  const ok = bodyOk(), pend = BODY.filter(b => b.status !== 'ok'), last = ok[ok.length - 1], prev = ok[ok.length - 2], u = wU();
+  const delta = (k, conv) => last && prev && last[k] != null && prev[k] != null ? (() => { const v = conv ? toW(last[k] - prev[k]) : last[k] - prev[k]; return `<span> ${v > 0 ? '+' : ''}${r1(v)}</span>`; })() : '';
+  let h = `<div class="card"><div class="ctitle"><b>Body composition</b><span>${last ? `latest ${shortD(last.date)}` : 'from InBody scans'}</span></div>`;
+  if (!ok.length && !pend.length) h += `<p class="hint">Take a photo of your InBody result sheet (or a screenshot of the InBody app) to track body fat and muscle, not just weight. ChowLog also uses your lean mass to sharpen your calorie estimate.</p>`;
+  if (last) h += `<div class="stats">
+      <div class="stat"><small>Body fat</small><b>${last.pbf != null ? r1(last.pbf) + '%' : '–'}${delta('pbf')}</b></div>
+      <div class="stat"><small>Skeletal muscle</small><b>${last.smmLb != null ? r1(toW(last.smmLb)) : '–'}<span> ${u}</span>${delta('smmLb', true)}</b></div>
+      <div class="stat"><small>Lean body mass</small><b>${last.lbmLb != null ? r1(toW(last.lbmLb)) : '–'}<span> ${u}</span></b></div>
+      <div class="stat"><small>Resting burn (BMR)</small><b>${last.bmr ? r0(last.bmr).toLocaleString() : '–'}<span> cal</span></b></div></div>
+      ${prev ? `<p class="hint">Changes are since ${shortD(prev.date)}.</p>` : ''}`;
+  const pp = ok.filter(b => b.pbf != null), sm = ok.filter(b => b.smmLb != null);
+  if (pp.length >= 2) h += `<h3 style="margin:14px 2px 4px">Body fat %</h3>` + lineChart(pp.map(b => ({date:b.date, lb:b.pbf})), 'Body fat trend');
+  if (sm.length >= 2) h += `<h3 style="margin:14px 2px 4px">Skeletal muscle (${u})</h3>` + lineChart(sm.map(b => ({date:b.date, lb:toW(b.smmLb)})), 'Muscle trend');
+  const rows = [...pend, ...ok.slice().reverse()].slice(0, 6);
+  if (rows.length) h += `<h3 style="margin:14px 2px 4px">Scans</h3>` + rows.map(b => `<button class="row" data-act="ibopen" data-id="${b.id}" style="border-top:1px solid var(--line)">
+      <div class="rm"><div class="rn">${b.status === 'ok' ? shortD(b.date) + (b.source === 'history' ? ' <small style="color:var(--mute)">from history</small>' : '') : b.status === 'error' ? 'Needs attention' : 'Waiting to be read'}</div>
+      <div class="rd">${b.status === 'ok' ? `${r1(toW(b.weightLb))} ${u}${b.pbf != null ? ` · ${r1(b.pbf)}% fat` : ''}${b.smmLb != null ? ` · ${r1(toW(b.smmLb))} ${u} muscle` : ''}${b.reviewed ? '' : ' · tap to check'}` : 'Tap to retry or delete'}</div></div></button>`).join('');
+  return h + `<div class="btns"><button class="primary" data-act="inbody">Scan InBody sheet</button></div></div>`;
+}
+
 const LABEL_SYS = `You read Nutrition Facts panels (or other nutrition information tables) from photos. Report the values for ONE serving exactly as printed; do not estimate or adjust. If the panel shows only per-100 g values, report those and set serving_size to "100 g". If it shows both per-serving and per-container columns, use per-serving. Respond with ONLY a JSON object, no markdown:
 {"product_name":"name if visible on the package, else empty string","serving_size":"as printed, e.g. 2/3 cup (55g)","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"readable":true}
 Set readable to false if the image is not a nutrition panel or the numbers are not legible.`;
@@ -1229,7 +1341,7 @@ async function resolveBarcode(e){
 let qRunning = false;
 async function processQueue(force){
   if (qRunning || (!navigator.onLine && !force)) return;
-  qRunning = true; let did = 0;
+  qRunning = true; let did = 0, ib = 0;
   try {
     const pend = (await idb.all('entries')).filter(e => e.status === 'pending').sort((a,b) => a.ts - b.ts);
     for (const e of pend){
@@ -1241,8 +1353,12 @@ async function processQueue(force){
         e.status = 'error'; e.error = err.message || String(err); await idb.put('entries', e);
       }
     }
+    if (S.apiKey) for (const b of BODY.filter(x => x.status === 'pending')) {
+      try { await resolveInbody(b); ib++; }
+      catch (err) { if (transient(err)) break; b.status = 'error'; b.error = err.message || String(err); await saveBody(); }
+    }
   } finally { qRunning = false; }
-  if (did) toast(`${did} queued ${did === 1 ? 'item' : 'items'} processed`);
+  if (ib || did) toast([ib ? 'InBody scan read. Check it on the Trends tab' : '', did ? `${did} queued ${did === 1 ? 'item' : 'items'} processed` : ''].filter(Boolean).join('. ') + '.');
   refresh();
 }
 window.addEventListener('online', () => { updateBadge(); processQueue(); });
@@ -1268,13 +1384,13 @@ function barChart(days, target, key, cls){
   s += `<text x="${pl}" y="${H - 2}" class="tlab">${shortD(days[0].d)}</text><text x="${W}" y="${H - 2}" class="tlab" text-anchor="end">${shortD(days[n-1].d)}</text>`;
   return s + '</svg>';
 }
-function lineChart(pts){
+function lineChart(pts, label = 'Weight trend'){
   if (pts.length < 2) return `<div class="empty">Log at least two weigh-ins to see a trend.</div>`;
   const W = 340, H = 140, pl = 34, pb = 16, pt = 8, ys = pts.map(p => p.lb);
   let mn = Math.min(...ys), mx = Math.max(...ys); if (mx - mn < 2){ mn -= 1; mx += 1; }
   const t0 = dnum(pts[0].date), span = Math.max(1, dnum(pts[pts.length-1].date) - t0);
   const X = d => pl + (dnum(d) - t0) / span * (W - pl - 6), Y = v => pt + (mx - v) / (mx - mn) * (H - pt - pb);
-  let s = `<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="Weight trend">`;
+  let s = `<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="${label}">`;
   s += `<text x="0" y="${Y(mx) + 4}" class="tlab">${r1(mx)}</text><text x="0" y="${Y(mn) + 4}" class="tlab">${r1(mn)}</text>`;
   s += `<polyline class="wline" points="${pts.map(p => X(p.date) + ',' + Y(p.lb)).join(' ')}"/>`;
   s += pts.map(p => `<circle cx="${X(p.date)}" cy="${Y(p.lb)}" r="3" class="wdot"/>`).join('');
@@ -1314,7 +1430,8 @@ async function renderTrends(){
   <div class="card"><div class="ctitle"><b>Weight</b><span>${latest ? `latest ${fmtW(latest.lb)} ${wU()}` : ''}${change != null ? ` · ${change > 0 ? '+' : ''}${r1(toW(change))} ${wU()}` : ''}</span></div>
     ${lineChart(wpts)}
     <div class="grid4" style="margin-top:12px"><label>Today's weight (${wU()})<input id="w_in" type="number" inputmode="decimal" step="0.1" value="${ws.find(w => w.date === end) ? r1(toW(ws.find(w => w.date === end).lb)) : ''}"></label>
-    <div class="btns" style="margin-top:20px"><button class="primary" id="w_go">Log weight</button></div></div></div>`;
+    <div class="btns" style="margin-top:20px"><button class="primary" id="w_go">Log weight</button></div></div></div>
+  ${bodyCard()}`;
   $('#w_go').onclick = async () => { const v = num($('#w_in').value); if (!v) return toast('Enter your weight'); await idb.put('weights', {date:end, lb:Math.round(fromW(v) * 100) / 100}); toast('Weight logged'); renderTrends(); };
 }
 
@@ -1349,7 +1466,7 @@ const PF_OPTS = [[0.8,'Standard'],[1,'Active'],[1.2,'High'],[1.5,'Very high']];
 // Mifflin-St Jeor BMR × activity, then adjusted for the goal, with safety floors.
 function calcTargets(o){
   const kg = o.lb * 0.453592, cm = (o.ft * 12 + o.inch) * 2.54;
-  const bmr = 10*kg + 6.25*cm - 5*o.age + (o.sex === 'm' ? 5 : -161);
+  const ls = leanScan(), bmr = ls ? ls.bmr || 370 + 21.6 * ls.lbmLb * 0.453592 : 10*kg + 6.25*cm - 5*o.age + (o.sex === 'm' ? 5 : -161);
   const life = bmr * LIFE[o.life].f, ex = o.wfreq ? WTYPE[o.wtype].m * kg * (o.wmin / 60) * o.wfreq / 7 : 0, tdee = life + ex;
   let cal = tdee, notes = [], lbwk = 0;
   if (o.goal === 'lose') {
@@ -1365,7 +1482,7 @@ function calcTargets(o){
   const p = Math.round(ref * (o.pf || PF_DEFAULT[o.goal]));
   const f = Math.round(Math.max(cal * 0.28 / 9, o.lb * 0.3));
   const c = Math.max(0, Math.round((cal - p*4 - f*9) / 4));
-  return {cal, p, c, f, bmr:Math.round(bmr), tdee:Math.round(tdee / 10) * 10, life:Math.round(life / 10) * 10, ex:Math.round(ex / 10) * 10, lbwk, notes};
+  return {cal, p, c, f, bmr:Math.round(bmr), scanDate:ls?.date, tdee:Math.round(tdee / 10) * 10, life:Math.round(life / 10) * 10, ex:Math.round(ex / 10) * 10, lbwk, notes};
 }
 let ob = null;
 function openSetup(first){
@@ -1412,6 +1529,7 @@ function renderSetup(){
     const r = calcTargets(ob), diff = r.cal - r.tdee;
     h = `${dots}<h2>Your daily targets</h2>
       <div class="obres"><span>${r.cal.toLocaleString()}</span><small>calories per day</small></div>
+      ${r.scanDate ? `<p class="hint">Using your InBody scan from ${shortD(r.scanDate)}: resting burn ${r.bmr.toLocaleString()} cal, based on your lean mass.</p>` : ''}
       <p class="hint">Maintenance is about ${r.tdee.toLocaleString()} cal/day${r.ex ? ` (${r.life.toLocaleString()} from daily life + ${r.ex.toLocaleString()} from workouts, averaged over the week)` : ''}. ${diff < 0 ? `This is ${Math.abs(diff).toLocaleString()} below it${ob.goal === 'lose' ? `, about ${r1(toW(r.lbwk))} ${wU()} of loss per week` : ''}.` : diff > 0 ? `This is ${diff.toLocaleString()} above it for steady muscle gain alongside strength training.` : 'This holds your weight steady.'}</p>
       ${r.notes.map(n => `<p class="hint" style="color:var(--signal)">${esc(n)}</p>`).join('')}
       <h3 style="margin:14px 2px 6px">Protein, grams per ${wU()} of ${ob.goalLb && ob.goalLb < ob.lb ? 'goal' : 'body'} weight</h3>
@@ -1508,7 +1626,7 @@ function renderSettings(){
       <p>When you take or choose a photo, ChowLog makes a clean copy that contains only the picture. Your location (GPS), camera details and other hidden photo data are removed before the photo is saved or sent anywhere. For gallery photos, only the date it was taken is read, to offer logging it at that time, and that date is never sent.</p></details>
     <details><summary>What leaves your phone, and why</summary>
       <ul>
-        <li><b>Anthropic (Claude):</b> the scrubbed meal or label photo, or the description you typed, to estimate nutrition. Nothing else from your log is included.</li>
+        <li><b>Anthropic (Claude):</b> the scrubbed meal, nutrition label or InBody photo, or the description you typed, to estimate nutrition. Nothing else from your log is included.</li>
         <li><b>Open Food Facts:</b> the barcode number or the words you search for, to look up a product.</li>
         <li><b>Wikipedia:</b> a short generic food name like "chicken salad," to find a stock photo for described foods.</li>
         <li><b>GitHub</b> (where the app is hosted): the normal web request made when the app loads or updates.</li>
@@ -1558,7 +1676,7 @@ function renderSettings(){
   $('#wipe').onclick = async () => {
     if (!confirm('Erase every entry, favorite, weight and setting on this phone? This cannot be undone.')) return;
     for (const s of ['entries','favorites','products','weights','photos','kv']) await idb.replace(s, []);
-    await loadSettings(); toast('All data erased'); refresh();
+    await loadSettings(); await loadBody(); toast('All data erased'); refresh();
   };
 }
 const STORES = ['entries','favorites','products','weights','photos','kv'];
@@ -1578,7 +1696,7 @@ $('#importInput').onchange = async ev => {
     if (!confirm('Replace everything on this phone with this backup?')) return;
     const key = S.apiKey;
     for (const s of STORES) await idb.replace(s, d[s] || []);
-    await loadSettings(); if (!S.apiKey && key){ S.apiKey = key; await saveSettings(); }
+    await loadSettings(); await loadBody(); if (!S.apiKey && key){ S.apiKey = key; await saveSettings(); }
     toast('Backup imported'); refresh();
   } catch { toast("That file isn't a ChowLog backup"); }
 };
@@ -1681,6 +1799,8 @@ document.addEventListener('click', ev => {
     case 'manual': manualSheet(); break;
     case 'describe': describeSheet(); break;
     case 'flexon': setFlexToday(true); break;
+    case 'inbody': choosePhoto({type:'inbody'}); break;
+    case 'ibopen': inbodyReview(d.id); break;
     case 'flexoff': setFlexToday(false); break;
     case 'obset': if (ob) { obRead(); if (d.f === 'units') { S.units = d.v; saveSettings(); if (ob.goal === 'lose') ob.pace = nearestPace(ob.pace); } ob[d.f] = isNaN(+d.v) ? d.v : +d.v; if (d.f === 'goal') { ob.pace = d.v === 'lose' ? PACE.lose[1][0] : d.v === 'gain' ? 250 : 0; ob.pf = PF_DEFAULT[d.v]; } renderSetup(); } break;
     case 'obnext': if (ob) obNext(); break;
@@ -1720,7 +1840,7 @@ document.addEventListener('keydown', ev => {
 
 (async () => {
   const firstRun = !(await idb.get('kv', 'settings'));
-  await loadSettings();
+  await loadSettings(); await loadBody();
   try { // one-time move of entries from the old single "Snacks" section into morning/afternoon/evening snacks
     for (const e of (await idb.all('entries')).filter(e => e.meal === 'snack')) { const m = mealForTime(entTime(e)); e.meal = SNACKS.has(m) ? m : {breakfast:'snack_am', lunch:'snack_pm', dinner:'snack_eve'}[m]; await idb.put('entries', e); }
   } catch {}

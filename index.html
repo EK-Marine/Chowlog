@@ -57,6 +57,10 @@ h3{font-size:15px;color:var(--mute);font-weight:600;margin:22px 4px 8px}
 .segs i{height:14px;border-radius:2px;background:var(--field-2)}
 .segs i.on{background:var(--coyote)}
 .segs i.ov{background:var(--signal)}
+.segs i.fx{background:hsl(272,45%,58%);opacity:.55}
+.fxbadge{display:inline-block;font-size:12px;font-weight:700;padding:3px 10px;border-radius:12px;background:hsl(272,45%,58%);color:#fff;margin-bottom:10px}
+.warn{color:var(--signal);font-weight:600}
+.fxl{color:var(--headink);opacity:.85;padding:10px 0 0;font-size:13px;text-decoration:underline}
 .macros{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .mac small{display:block;font-size:12px;opacity:.75}
 .mac b{font-size:17px;font-variant-numeric:tabular-nums}
@@ -452,16 +456,87 @@ async function refresh(){
 }
 
 /* ---------- Calendar ---------- */
-// Within ±5% of target = green. Under = yellow, over = red; each further 5% step away gets more intense (8 steps max).
+// Green band depends on the goal: losing fat 85–105%, building muscle 95–115%, otherwise 90–110% of target.
+// Under = yellow, over = red; each further 5% step past the band gets more intense (8 steps max).
+function goalBand(){ return ({lose:[0.85, 1.05], gain:[0.95, 1.15]})[S.profile?.goal] || [0.90, 1.10]; }
+function bandText(){ const [lo, hi] = goalBand(); return `green = ${Math.round(lo*100)}–${Math.round(hi*100)}% of target`; }
 function goalColor(cal, target){
   if (!cal || !target) return '';
-  const r = cal / target;
-  if (r >= 0.95 && r <= 1.05) return 'hsl(135,55%,40%)';
-  const n = Math.min(8, Math.max(1, Math.ceil((r < 0.95 ? 0.95 - r : r - 1.05) / 0.05 - 1e-9))), t = (n - 1) / 7;
-  return r < 0.95
+  const r = cal / target, [lo, hi] = goalBand();
+  if (r >= lo - 1e-9 && r <= hi + 1e-9) return 'hsl(135,55%,40%)';
+  const n = Math.min(8, Math.max(1, Math.ceil((r < lo ? lo - r : r - hi) / 0.05 - 1e-9))), t = (n - 1) / 7;
+  return r < lo
     ? `hsl(${50 - t*12},${85 + t*15}%,${78 - t*30}%)`   // pale yellow → deep amber
     : `hsl(${4 - t*4},${70 + t*20}%,${78 - t*40}%)`;   // pale red → deep red
 }
+/* ---------- Flex day (cheat or refeed) ---------- */
+const FLEX_COLOR = 'hsl(272,45%,58%)';
+const DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const FREQ = {'1':'Every week', '2':'Every 2 weeks', '3':'Every 3 weeks', 'm':'Once a month (first of the month)'};
+const flexCfg = () => S.flex || {type:'off'};
+const flexName = () => flexCfg().type === 'refeed' ? 'refeed day' : 'cheat day';
+function dowOf(s){ const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d).getDay(); }
+function nextDow(from, dow){ return addDays(from, (dow - dowOf(from) + 7) % 7); }
+function flexPeriod(s){ // [start, end] of the cycle a date belongs to
+  const f = flexCfg();
+  if (f.freq === 'm') { const st = s.slice(0, 8) + '01', [y, m] = s.split('-').map(Number); return [st, ymd(new Date(y, m, 0))]; }
+  const n = +f.freq || 1, a = weekStart(f.anchor || s), k = Math.floor((dnum(weekStart(s)) - dnum(a)) / 7 / n);
+  const st = addDays(a, k * 7 * n); return [st, addDays(st, 7 * n - 1)];
+}
+function flexScheduled(s){
+  const f = flexCfg(); if (f.type === 'off' || dowOf(s) !== +f.dow) return false;
+  if (f.freq === 'm') return +s.slice(8) <= 7;
+  const n = +f.freq || 1; if (n === 1) return true;
+  return ((Math.round((dnum(s) - dnum(f.anchor || s)) / 7) % n) + n) % n === 0;
+}
+function flexOn(s){
+  const f = flexCfg(); if (f.type === 'off') return false;
+  const o = f.overrides?.[s]; return o === 'on' ? true : o === 'off' ? false : flexScheduled(s);
+}
+// The targets that apply on a given date (cheat day: no calorie target; refeed day: raised target, extra in carbs).
+function targetFor(s){
+  const base = {cal:S.cal, p:S.p, c:S.c, f:S.f, kind:''};
+  if (!flexOn(s)) return base;
+  if (flexCfg().type === 'cheat') return {...base, kind:'cheat'};
+  const cal = Math.max(S.cal, num(flexCfg().cal) || Math.round(S.cal * 1.2 / 10) * 10);
+  return {...base, cal, c:Math.round(S.c + (cal - S.cal) / 4), kind:'refeed'};
+}
+function dayColor(s, cal){ const T = targetFor(s); return T.kind === 'cheat' ? (cal ? FLEX_COLOR : '') : goalColor(cal, T.cal); }
+// Can today become this cycle's flex day? Only if the cycle's flex day hasn't already happened.
+function canMoveFlexTo(s){
+  if (flexCfg().type === 'off' || flexOn(s)) return false;
+  const [st] = flexPeriod(s); for (let d = st; d < s; d = addDays(d, 1)) if (flexOn(d)) return false;
+  return true;
+}
+// Refeed guardrail: compares the refeed to estimated maintenance and shows the effect on weekly progress.
+function refeedAdvice(cal, freq){
+  if (!cal) return '';
+  const extra = cal - S.cal;
+  if (extra <= 0) return `<span class="warn">This is at or below your normal target of ${S.cal.toLocaleString()}, so the refeed won't add anything. Try your maintenance calories instead.</span>`;
+  const prof = S.profile?.lb ? S.profile : null, m = prof ? calcTargets(prof).tdee : null;
+  const perWeek = extra / ({'1':1, '2':2, '3':3, 'm':4.35})[freq || '1'];
+  let out = `Adds ${extra.toLocaleString()} calories on refeed days, about ${r0(perWeek).toLocaleString()} a week on average.`;
+  if (!m) return out + ' Run “Estimate my targets” to compare this with your maintenance.';
+  const over = cal - m;
+  if (over > m * 0.1) out = `<span class="warn">That's ${over.toLocaleString()} calories above your estimated maintenance (${m.toLocaleString()}). More than about 10% over maintenance works more like a cheat day than a refeed. A typical refeed is ${m.toLocaleString()}–${(Math.round(m * 1.1 / 10) * 10).toLocaleString()}.</span> ` + out;
+  else if (S.cal >= m) out += ` Note: your normal target is already at or above your estimated maintenance (${m.toLocaleString()}).`;
+  if (prof.goal === 'lose' && m > S.cal) {
+    const wkDef = (m - S.cal) * 7, before = wkDef / 3500, after = (wkDef - perWeek) / 3500;
+    out += after <= 0
+      ? ` <span class="warn">At this amount and frequency, refeeds cancel your weekly deficit, so fat loss would stall.</span>`
+      : ` Estimated fat loss: about ${r1(toW(after))} ${wU()}/week instead of ${r1(toW(before))}.`;
+  }
+  return out;
+}
+async function setFlexToday(on){
+  const f = {...flexCfg(), overrides:{...(flexCfg().overrides || {})}}, t = todayStr(), [st, en] = flexPeriod(t);
+  if (on) { for (let d = st; d <= en; d = addDays(d, 1)) if (d !== t && flexOn(d)) f.overrides[d] = 'off'; f.overrides[t] = 'on'; }
+  else f.overrides[t] = 'off';
+  const cut = addDays(t, -400); for (const k of Object.keys(f.overrides)) if (k < cut) delete f.overrides[k];
+  S.flex = f; await saveSettings(); refresh();
+  toast(on ? `Today is your ${flexName()}` : `${flexName()[0].toUpperCase() + flexName().slice(1)} skipped. You can make another day this ${f.freq === 'm' ? 'month' : 'cycle'} your ${flexName()}.`);
+}
+
 function weekStart(s){ const [y,m,d] = s.split('-').map(Number); return addDays(s, -new Date(y, m-1, d).getDay()); }
 async function calendarHTML(){
   const t = todayStr(), month = calMonth || curDate.slice(0,7) + '-01';
@@ -488,10 +563,10 @@ async function calendarHTML(){
   const cells = days.map(d => {
     const c = tot[d], cls = ['cal-d', d === curDate ? 'sel' : '', d === t ? 'today' : '', calOpen && d.slice(0,7) !== month.slice(0,7) ? 'out' : ''].join(' ');
     return `<button class="${cls}" data-act="pickday" data-d="${d}" ${d > t ? 'disabled' : ''} aria-label="${shortD(d)}${c ? ', ' + r0(c) + ' calories' : ''}">
-      <b>${+d.slice(8)}</b><i style="background:${goalColor(c, S.cal) || 'transparent'}"></i></button>`;
+      <b>${+d.slice(8)}</b><i style="background:${dayColor(d, c) || 'transparent'};${!c && flexOn(d) ? `box-shadow:inset 0 0 0 1.5px ${FLEX_COLOR}` : ''}"></i></button>`;
   }).join('');
   return `<div class="card cal">${head}<div class="cal-grid">${wd}${cells}</div>
-    <div class="cal-foot"><span><span class="dot" style="background:${goalColor(0.8, 1)}"></span>Under<span class="dot" style="background:${goalColor(1, 1)}"></span>On target<span class="dot" style="background:${goalColor(1.2, 1)}"></span>Over</span>
+    <div class="cal-foot"><span><span class="dot" style="background:${goalColor(goalBand()[0] - 0.1, 1)}"></span>Under<span class="dot" style="background:${goalColor(1, 1)}"></span>On target<span class="dot" style="background:${goalColor(goalBand()[1] + 0.1, 1)}"></span>Over${flexCfg().type !== 'off' ? `<span class="dot" style="background:${FLEX_COLOR}"></span>${flexCfg().type === 'refeed' ? 'Refeed' : 'Cheat'}` : ''}</span>
     <span>${curDate !== t ? '<button class="link" data-act="pickday" data-d="' + t + '" style="padding:4px 8px">Today</button>' : ''}<button class="link" data-act="caltoggle" style="padding:4px 8px">${calOpen ? 'Show week ▴' : 'Show month ▾'}</button></span></div></div>`;
 }
 
@@ -509,14 +584,22 @@ function entryRow(e){
 }
 async function renderToday(){
   const es = (await idb.byDate(curDate)).sort((a, b) => byTime(b, a)); // newest first
-  const t = totals(es.filter(e => e.status === 'ok'));
-  const left = S.cal - t.cal, filled = Math.round(Math.min(t.cal, S.cal) / S.cal * 20);
-  const segs = Array.from({length:20}, (_,i) => `<i class="${left < 0 ? 'ov' : i < filled ? 'on' : ''}"></i>`).join('');
+  const t = totals(es.filter(e => e.status === 'ok')), T = targetFor(curDate), isToday = curDate === todayStr();
+  const left = T.cal - t.cal, filled = Math.round(Math.min(t.cal, T.cal) / T.cal * 20);
+  const segs = Array.from({length:20}, (_,i) => `<i class="${T.kind === 'cheat' ? 'fx' : left < 0 ? 'ov' : i < filled ? 'on' : ''}"></i>`).join('');
+  const flexLink = !isToday || flexCfg().type === 'off' ? '' : T.kind
+    ? `<button class="link fxl" data-act="flexoff">Not today</button>`
+    : canMoveFlexTo(curDate) ? `<button class="link fxl" data-act="flexon">Make today your ${flexName()}</button>` : '';
   let h = await calendarHTML() + `<div class="card gauge">
-    <div><span class="num ${left<0?'over':''}">${Math.abs(r0(left)).toLocaleString()}</span><span class="lbl">${left < 0 ? 'calories over' : 'calories left'}</span></div>
-    <div class="sub">${r0(t.cal).toLocaleString()} eaten of ${S.cal.toLocaleString()}</div>
+    ${T.kind ? `<div class="fxbadge">${T.kind === 'cheat' ? '★ Cheat day' : '★ Refeed day'}</div>` : ''}
+    ${T.kind === 'cheat'
+      ? `<div><span class="num">${r0(t.cal).toLocaleString()}</span><span class="lbl">calories eaten</span></div>
+         <div class="sub">No calorie target today. Logging still counts toward your weekly average.</div>`
+      : `<div><span class="num ${left<0?'over':''}">${Math.abs(r0(left)).toLocaleString()}</span><span class="lbl">${left < 0 ? 'calories over' : 'calories left'}</span></div>
+         <div class="sub">${r0(t.cal).toLocaleString()} eaten of ${T.cal.toLocaleString()}${T.kind === 'refeed' ? ` (raised from ${S.cal.toLocaleString()}, extra in carbs)` : ''}</div>`}
     <div class="segs">${segs}</div>
-    <div class="macros">${macro('Protein',t.p,S.p,'p')}${macro('Carbs',t.c,S.c,'c')}${macro('Fat',t.f,S.f,'f')}</div>
+    <div class="macros">${macro('Protein',t.p,T.p,'p')}${macro('Carbs',t.c,T.c,'c')}${macro('Fat',t.f,T.f,'f')}</div>
+    ${flexLink}
   </div>`;
   h += `<div class="card meal"><div class="mh"><b>Food log</b><span>${es.length} ${es.length === 1 ? 'item' : 'items'}</span><button class="mini" data-act="addto">Add</button></div>`;
   h += es.length ? es.map(entryRow).join('') : `<div class="empty">Nothing logged ${curDate === todayStr() ? 'yet today' : 'this day'}.</div>`;
@@ -1179,7 +1262,7 @@ function barChart(days, target, key, cls){
   const max = Math.max((target || 0) * 1.25, ...days.map(d => d[key]) .map(v => v * 1.1), 1), bw = (W - pl) / n;
   const Y = v => H - pb - v / max * (H - pb - 6);
   let s = `<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="Daily ${key === 'cal' ? 'calories' : 'protein'}">`;
-  days.forEach((d, i) => { const y = Y(d[key]); s += `<rect x="${pl + i*bw + bw*0.15}" y="${y}" width="${Math.max(1, bw*0.7)}" height="${H - pb - y}" rx="2" ${cls === 'b-ok' ? `style="fill:${goalColor(d[key], target)}"` : `class="${cls}"`}/>`; });
+  days.forEach((d, i) => { const y = Y(d[key]); s += `<rect x="${pl + i*bw + bw*0.15}" y="${y}" width="${Math.max(1, bw*0.7)}" height="${H - pb - y}" rx="2" ${cls === 'b-ok' ? `style="fill:${dayColor(d.d, d[key]) || 'transparent'}"` : `class="${cls}"`}/>`; });
   if (target) { const ty = Y(target); s += `<line x1="${pl}" x2="${W}" y1="${ty}" y2="${ty}" class="tline"/><text x="0" y="${ty + 3}" class="tlab">${target}</text>`; }
   else s += `<text x="0" y="${Y(max/1.1) + 3}" class="tlab">${r0(max/1.1)}</text>`;
   s += `<text x="${pl}" y="${H - 2}" class="tlab">${shortD(days[0].d)}</text><text x="${W}" y="${H - 2}" class="tlab" text-anchor="end">${shortD(days[n-1].d)}</text>`;
@@ -1217,7 +1300,7 @@ async function renderTrends(){
   $('#tab-trends').innerHTML = `<div class="chips">${[7,30,90].map(n => `<button class="chip ${n===trendDays?'on':''}" data-act="range" data-n="${n}">${n} days</button>`).join('')}</div>
   <div class="chips">${`<button class="chip ${allMeals?'on':''}" data-act="tmeal" data-m="all">All meals</button>` +
     MEALS.map(m => `<button class="chip ${!allMeals && trendMeals.has(m) ? 'on' : ''}" data-act="tmeal" data-m="${m}">${MEAL_LABEL[m]}</button>`).join('')}</div>
-  <div class="card"><div class="ctitle"><b>Calories</b><span>${allMeals ? 'green = within 5% of target' : esc(mealNames)}</span></div>${barChart(days, allMeals ? S.cal : 0, 'cal', allMeals ? 'b-ok' : 'b-n')}
+  <div class="card"><div class="ctitle"><b>Calories</b><span>${allMeals ? bandText() : esc(mealNames)}</span></div>${barChart(days, allMeals ? S.cal : 0, 'cal', allMeals ? 'b-ok' : 'b-n')}
     <div class="stats">
       <div class="stat"><small>Average per logged day</small><b>${r0(avg('cal')).toLocaleString()}${sl(0, S.cal.toLocaleString())}</b></div>
       <div class="stat"><small>Days logged</small><b>${logged.length}<span> of ${trendDays}</span></b></div>
@@ -1386,6 +1469,21 @@ function renderSettings(){
     <div class="grid4">${numF('t_cal','Calories',S.cal)}${numF('t_p','Protein (g)',S.p)}${numF('t_c','Carbs (g)',S.c)}${numF('t_f','Fat (g)',S.f)}</div>
     <p class="hint" id="t_chk"></p>
     <div class="btns"><button id="t_est">Estimate my targets</button><button class="primary" id="t_save">Save targets</button></div></div>
+  <div class="card"><h2>Flex day</h2>
+    <p class="hint">Plan a regular break from your target. You can always move it from the Today screen when plans change.</p>
+    <label>Type<select id="fx_type">
+      <option value="off" ${flexCfg().type === 'off' ? 'selected' : ''}>Off</option>
+      <option value="refeed" ${flexCfg().type === 'refeed' ? 'selected' : ''}>Refeed day (raised target, extra carbs)</option>
+      <option value="cheat" ${flexCfg().type === 'cheat' ? 'selected' : ''}>Cheat day (no target)</option></select></label>
+    <div id="fx_more" ${flexCfg().type === 'off' ? 'hidden' : ''}>
+      <div class="grid4"><label>Day<select id="fx_dow">${DOW.map((n, i) => `<option value="${i}" ${+(flexCfg().dow ?? 6) === i ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+      <label>How often<select id="fx_freq">${Object.entries(FREQ).map(([k, n]) => `<option value="${k}" ${(flexCfg().freq || '1') === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div>
+      <div id="fx_refeed" ${flexCfg().type === 'refeed' ? '' : 'hidden'}>${numF('fx_cal', 'Refeed day calories', flexCfg().cal || (S.profile?.lb ? calcTargets({...S.profile, pf:S.profile.pf}).tdee : Math.round(S.cal * 1.2 / 10) * 10))}
+        <p class="hint">Defaults to your estimated maintenance calories. Protein and fat stay the same; the extra goes to carbs.</p></div>
+      <p class="hint" id="fx_next"></p>
+      <p class="hint" id="fx_note"></p>
+      <div class="btns"><button class="primary" id="fx_save">Save flex day</button></div>
+    </div></div>
   <div class="card"><h2>AI estimates</h2>
     <p class="hint">Photos, labels and descriptions are analyzed by Claude using your own Anthropic API key. The key is stored only on this phone.</p>
     <label>API key<input id="ai_key" type="password" autocomplete="off" value="${esc(S.apiKey)}" placeholder="sk-ant-…"></label>
@@ -1426,6 +1524,24 @@ function renderSettings(){
   const chk = () => { const k = 4*num($('#t_p').value) + 4*num($('#t_c').value) + 9*num($('#t_f').value); $('#t_chk').textContent = `Your macros add up to ${r0(k).toLocaleString()} calories.`; };
   ['t_p','t_c','t_f'].forEach(id => $('#'+id).oninput = chk); chk();
   $('#t_est').onclick = () => openSetup(false);
+  const fxUpd = () => {
+    const ty = $('#fx_type').value; $('#fx_more').hidden = ty === 'off'; $('#fx_refeed').hidden = ty !== 'refeed';
+    $('#fx_note').innerHTML = ty === 'cheat' && S.profile?.goal === 'lose'
+      ? 'Heads up: one big cheat day can cancel several days of your deficit. A refeed day gives a similar break with less impact on fat loss.'
+      : ty === 'refeed' ? refeedAdvice(num($('#fx_cal').value), $('#fx_freq').value) : '';
+  };
+  $('#fx_freq').onchange = fxUpd;
+  $('#fx_type').onchange = async () => { fxUpd(); if ($('#fx_type').value === 'off' && flexCfg().type !== 'off') { S.flex = {...flexCfg(), type:'off'}; await saveSettings(); toast('Flex day turned off'); } }; $('#fx_cal').oninput = fxUpd; fxUpd();
+  const showNext = () => { if (flexCfg().type === 'off') return; let d = todayStr(); for (let i = 0; i < 70 && !flexOn(d); i++) d = addDays(d, 1);
+    $('#fx_next').textContent = flexOn(d) ? `Next ${flexName()}: ${d === todayStr() ? 'today' : dayName(d)}.` : ''; };
+  showNext();
+  $('#fx_save').onclick = async () => {
+    const type = $('#fx_type').value, dow = +$('#fx_dow').value, freq = $('#fx_freq').value, old = flexCfg();
+    const keepAnchor = old.anchor && +old.dow === dow && old.freq === freq;
+    S.flex = {type, dow, freq, anchor:keepAnchor ? old.anchor : nextDow(todayStr(), dow), cal:r0($('#fx_cal').value) || undefined,
+      overrides:keepAnchor ? (old.overrides || {}) : {}};
+    await saveSettings(); toast('Flex day saved'); renderSettings();
+  };
   $('#t_save').onclick = async () => { for (const k of ['cal','p','c','f']) S[k] = r0($('#t_'+k).value) || S[k]; await saveSettings(); toast('Targets saved'); };
   $('#ai_save').onclick = async () => { S.apiKey = $('#ai_key').value.trim(); S.model = $('#ai_model').value.trim() || DEFAULTS.model; await saveSettings(); toast('Saved'); processQueue(); };
   $('#ai_test').onclick = async () => {
@@ -1564,6 +1680,8 @@ document.addEventListener('click', ev => {
     case 'scan': scanSheet(); break;
     case 'manual': manualSheet(); break;
     case 'describe': describeSheet(); break;
+    case 'flexon': setFlexToday(true); break;
+    case 'flexoff': setFlexToday(false); break;
     case 'obset': if (ob) { obRead(); if (d.f === 'units') { S.units = d.v; saveSettings(); if (ob.goal === 'lose') ob.pace = nearestPace(ob.pace); } ob[d.f] = isNaN(+d.v) ? d.v : +d.v; if (d.f === 'goal') { ob.pace = d.v === 'lose' ? PACE.lose[1][0] : d.v === 'gain' ? 250 : 0; ob.pf = PF_DEFAULT[d.v]; } renderSetup(); } break;
     case 'obnext': if (ob) obNext(); break;
     case 'obback': if (ob) { obRead(); ob.step--; renderSetup(); } break;

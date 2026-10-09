@@ -149,7 +149,7 @@ h3.hrow{display:flex;align-items:center;justify-content:space-between}
 .seg5{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}.seg5 .opt{text-align:center;padding:9px 2px}
 .seg4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.seg4 .opt{text-align:center;padding:9px 4px}.seg4 .opt small{font-size:11px}
 .why{border:1px solid var(--line);border-radius:var(--r-sm);padding:10px 12px;margin:8px 0 12px}
-.why summary{font-weight:600;cursor:pointer}.why p{font-size:14px;color:var(--mute);margin:8px 0 0}
+.why summary{font-weight:600;cursor:pointer}.why textarea{margin-top:8px}.why p{font-size:14px;color:var(--mute);margin:8px 0 0}
 .obdots{display:flex;gap:6px;margin-bottom:12px}.obdots i{flex:1;height:4px;border-radius:2px;background:var(--line)}.obdots i.on{background:var(--coyote)}
 .obres{text-align:center;margin:6px 0 10px}.obres span{display:block;font-size:46px;font-weight:800;letter-spacing:-1px;font-variant-numeric:tabular-nums}
 .obres small{color:var(--mute)}
@@ -756,6 +756,10 @@ async function entrySheet(id){
       ${amtInput('e_scale', 'Multiply by')}</div>${fracChips('e_scale')}
       ${whenFields(e)}
       <p class="hint">Use “Multiply by” for portions: 0.5 if you ate half, 2 for a double.</p>
+      ${e.source === 'barcode' || e.source === 'label' || e.source === 'search' ? '' : `<details class="why" ${e.source === 'text' ? 'open' : ''}><summary>Recalculate from a description</summary>
+        <p>Change the description and Claude re-estimates the calories and macros, for example "large instead of medium" or "no dressing."</p>
+        <textarea id="e_desc" placeholder="Wendy's Apple Pecan Chicken Salad, half size, no dressing">${esc(e.desc || (e.source === 'ai' ? (e.note ? e.name + ', ' + e.note : e.name) : e.name))}</textarea>
+        <div class="btns"><button class="primary" id="e_recalc">Recalculate</button></div></details>`}
       <div class="btns"><button class="danger" id="e_del">Delete</button><button id="e_fav">Favorite</button>${e.date !== todayStr() ? '<button id="e_copy">Log today</button>' : ''}<button class="primary" id="e_save">Save</button></div>`;
     sheet(h);
     const read = () => { const v = readMacros('e_'), k = amtOf('e_scale') || 1; return {...v, cal:v.cal*k, p:v.p*k, c:v.c*k, f:v.f*k}; };
@@ -770,6 +774,15 @@ async function entrySheet(id){
       if (k !== 1 && e.items) e.items = e.items.map(i => ({...i, cal:r1(i.cal*k), p:r1(i.p*k), c:r1(i.c*k), f:r1(i.f*k)}));
       Object.assign(e, v, {meal:$('#e_meal').value}); for (const k of ['cal','p','c','f']) e[k] = r1(e[k]);
       await idb.put('entries', e); closeSheet(); toast(e.date !== oldDate ? `Moved to ${shortD(e.date)}` : 'Saved'); refresh();
+    };
+    if ($('#e_recalc')) $('#e_recalc').onclick = async () => {
+      const desc = $('#e_desc').value.trim(); if (!desc) return toast('Describe the food first');
+      if (!S.apiKey) return toast('Add your API key in Settings first');
+      if (!applyWhen(e)) return;
+      Object.assign(e, {meal:$('#e_meal').value, status:'pending', error:null, name:desc.slice(0, 80),
+        pending:{type:'text', desc, keepThumb:e.source === 'ai' && !!e.thumb}}); // keep your own meal photo
+      await idb.put('entries', e); closeSheet();
+      toast(navigator.onLine ? 'Recalculating…' : 'Queued. It will recalculate when you reconnect.'); refresh(); processQueue();
     };
     $('#e_fav').onclick = async () => { const v = read(); await idb.put('favorites', {id:uid(), name:v.name || 'Favorite', cal:r1(v.cal), p:r1(v.p), c:r1(v.c), f:r1(v.f), thumb:e.thumb, used:Date.now()}); toast('Saved to favorites'); };
     if ($('#e_copy')) $('#e_copy').onclick = async () => {
@@ -943,9 +956,9 @@ async function resolveText(e){
   let txt;
   try { txt = await callClaude(content, 2500, TEXT_SYS, tools); }
   catch (err) { if (tools && err instanceof HttpErr && err.status === 400) txt = await callClaude(content, 2500, TEXT_SYS); else throw err; } // web search unavailable: estimate without it
-  const d = parseJSON(txt);
+  const d = parseJSON(txt), keepThumb = e.pending.keepThumb;
   applyEstimate(e, d, "That description couldn't be estimated. Add more detail or enter it manually.");
-  e.thumb = (await wikiThumb(d.photo_term || e.name)) || e.thumb;
+  if (!keepThumb) e.thumb = (await wikiThumb(d.photo_term || e.name)) || e.thumb;
   await idb.put('entries', e);
 }
 

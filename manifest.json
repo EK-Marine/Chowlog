@@ -1,14 +1,14 @@
 {
-  "id": "platemates-app",
-  "name": "PlateMates",
-  "short_name": "PlateMates",
-  "description": "Workout tracker for up to 6 lifters that works offline",
+  "id": "/chowlog/",
+  "name": "ChowLog",
+  "short_name": "ChowLog",
+  "description": "Offline-first calorie and macro tracker",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#E8E9E5",
-  "theme_color": "#C4302A",
+  "background_color": "#ffffff",
+  "theme_color": "#2e3b2c",
   "icons": [
     {
       "src": "icon-192.png",

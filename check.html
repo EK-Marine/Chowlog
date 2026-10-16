@@ -30,6 +30,7 @@ a{color:inherit}
   <p class="lead">Looks at what this phone has stored for your GitHub Pages address. It only reads. It never changes or deletes anything.</p>
   <div class="card"><div id="verdict" class="verdict">Checking…</div><p class="hint" id="verdict2"></p><div id="exp"></div></div>
   <div class="card"><h2>Databases</h2><div id="dbs">Checking…</div></div>
+  <div class="card"><h2>Other saved data (used by apps like PlateMates)</h2><div id="ls">Checking…</div></div>
   <div class="card"><h2>Storage used</h2><div id="usage">Checking…</div></div>
   <div class="card"><h2>Saved app files (offline caches)</h2><div id="caches">Checking…</div></div>
   <p class="hint"><a href="./">Back to ChowLog</a></p>
@@ -67,9 +68,14 @@ async function readDb(name, version){
       ${d.err ? `<p class="hint">Couldn't read: ${esc(d.err)}</p>` : Object.entries(d.stores).map(([s, v]) => row(esc(s), v.count + (v.count === 1 ? ' record' : ' records'))).join('')}</div>`).join('')
     : (list.length === 0 ? '<p class="hint">No databases at all for this address.</p>' : '');
 
+  // Simple key-value storage (PlateMates keeps its data here)
+  let lsKeys = [];
+  try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); lsKeys.push([k, (localStorage.getItem(k) || '').length]); } } catch {}
+  $('#ls').innerHTML = lsKeys.length ? lsKeys.map(([k, n]) => row(esc(k) + (/liftlog/i.test(k) ? ' (PlateMates)' : ''), kb(n))).join('') : '<p class="hint">None.</p>';
+
   // ChowLog verdict + export
   const cl = found.find(d => d.name === 'chowlog' && !d.err), n = cl ? Object.values(cl.stores).reduce((a, v) => a + v.count, 0) : 0;
-  const entries = cl?.stores.entries?.count || 0, others = found.filter(d => d.name !== 'chowlog');
+  const entries = cl?.stores.entries?.count || 0, others = [...found.filter(d => d.name !== 'chowlog').map(d => d.name), ...lsKeys.map(([k]) => k)];
   if (cl && entries > 0) {
     $('#verdict').innerHTML = `<span class="ok">ChowLog data found: ${entries} food entries</span>`;
     $('#verdict2').textContent = 'Download it now. Then in ChowLog go to Settings → Import backup and choose the file.';
@@ -84,9 +90,9 @@ async function readDb(name, version){
   } else {
     $('#verdict').innerHTML = `<span class="bad">No ChowLog food entries on this phone in this browser</span>`;
     $('#verdict2').textContent = !cl
-      ? (others.length ? `ChowLog's database is missing, but ${others.length} other app database${others.length > 1 ? 's are' : ' is'} still here. Something removed only ChowLog's data. Please tell Claude what this page shows.`
+      ? (others.length ? `ChowLog's database is missing, but other app data is still here (${others.map(esc).join(', ')}). Something removed only ChowLog's data. Please tell Claude what this page shows.`
                        : 'Nothing is stored for this address at all, which points to the browser or phone clearing the site\'s data.')
-      : `ChowLog's database exists with ${n} record${n === 1 ? '' : 's'} but no food entries${others.length ? ', and other app data is still here' : ''}. Please tell Claude what this page shows.`;
+      : `ChowLog's database exists with ${n} record${n === 1 ? '' : 's'} but no food entries${others.length ? `, and other app data is still here (${others.map(esc).join(', ')})` : ''}. Please tell Claude what this page shows.`;
   }
 
   // Usage breakdown

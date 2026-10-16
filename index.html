@@ -60,6 +60,7 @@ h3{font-size:15px;color:var(--mute);font-weight:600;margin:22px 4px 8px}
 .segs i.fx{background:hsl(272,45%,58%);opacity:.55}
 .fxbadge{display:inline-block;font-size:12px;font-weight:700;padding:3px 10px;border-radius:12px;background:hsl(272,45%,58%);color:#fff;margin-bottom:10px}
 .warn{color:var(--signal);font-weight:600}
+.bkup{border-color:var(--coyote)}.bkup b{font-size:16px}
 .fxl{color:var(--headink);opacity:.85;padding:10px 0 0;font-size:13px;text-decoration:underline}
 .macros{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .mac small{display:block;font-size:12px;opacity:.75}
@@ -601,6 +602,9 @@ async function renderToday(){
     <div class="macros">${macro('Protein',t.p,T.p,'p')}${macro('Carbs',t.c,T.c,'c')}${macro('Fat',t.f,T.f,'f')}</div>
     ${flexLink}
   </div>`;
+  if (isToday && await backupDue()) h += `<div class="card bkup"><b>Back up your log</b>
+    <p class="hint">ChowLog keeps everything on this phone only. ${S.lastBackup ? `Your last backup was ${ago(S.lastBackup)}.` : "You haven't made a backup yet."} A backup file protects you if the phone's storage is cleared.</p>
+    <div class="btns"><button data-act="bklater">Later</button><button class="primary" data-act="bknow">Back up now</button></div></div>`;
   h += `<div class="card meal"><div class="mh"><b>Food log</b><span>${es.length} ${es.length === 1 ? 'item' : 'items'}</span><button class="mini" data-act="addto">Add</button></div>`;
   h += es.length ? es.map(entryRow).join('') : `<div class="empty">Nothing logged ${curDate === todayStr() ? 'yet today' : 'this day'}.</div>`;
   h += `</div>`;
@@ -1255,18 +1259,46 @@ async function runSearch(q){
 
 let stream = null, scanTimer = null;
 function stopCam(){ clearTimeout(scanTimer); if (stream){ stream.getTracks().forEach(t => t.stop()); stream = null; } }
+// Barcode reading: Chrome's built-in BarcodeDetector when available; otherwise the bundled ZXing library (iPhone/Safari).
+let zxingP = null;
+function loadZXing(){
+  return zxingP ||= new Promise((res, rej) => {
+    if (window.ZXing) return res(window.ZXing);
+    const s = document.createElement('script'); s.src = 'zxing.min.js';
+    s.onload = () => window.ZXing ? res(window.ZXing) : rej(new Error('no ZXing'));
+    s.onerror = () => { zxingP = null; rej(new Error('Barcode reader failed to load')); };
+    document.head.appendChild(s);
+  });
+}
+async function makeDetector(){
+  if ('BarcodeDetector' in window) {
+    let formats = ['ean_13','ean_8','upc_a','upc_e'];
+    try { const sup = await BarcodeDetector.getSupportedFormats(); formats = formats.filter(f => sup.includes(f)); } catch {}
+    if (formats.length) return new BarcodeDetector({formats});
+  }
+  const Z = await loadZXing(), hints = new Map();
+  hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A, Z.BarcodeFormat.UPC_E]);
+  hints.set(Z.DecodeHintType.TRY_HARDER, true);
+  const reader = new Z.MultiFormatReader(); reader.setHints(hints);
+  const c = document.createElement('canvas'), ctx = c.getContext('2d', {willReadFrequently:true});
+  return {detect: async v => {
+    const w = v.videoWidth, hgt = v.videoHeight; if (!w || !hgt) return [];
+    const cw = Math.min(960, w), s = cw / w, ch = Math.round(hgt * 0.5 * s); // middle band, where the reticle is
+    c.width = cw; c.height = ch; ctx.drawImage(v, 0, hgt * 0.25, w, hgt * 0.5, 0, 0, cw, ch);
+    try { return [{rawValue:reader.decode(new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(c)))).getText()}]; }
+    catch { return []; } finally { reader.reset(); }
+  }};
+}
 async function scanSheet(){
-  const has = 'BarcodeDetector' in window;
+  const has = !!navigator.mediaDevices?.getUserMedia;
   sheet(`<h2>Scan a barcode</h2>${has ? `<div class="cam"><video id="sv" playsinline muted></video><div class="reticle"></div></div>`
-      : `<p class="hint">This browser can't scan with the camera. Type the number under the barcode instead.</p>`}
+      : `<p class="hint">This browser can't use the camera. Type the number under the barcode instead.</p>`}
     <label>Or type the number<input id="bc_in" inputmode="numeric" placeholder="012345678905"></label>
     <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="bc_go">Look up</button></div>`, stopCam);
   $('#bc_go').onclick = () => { const v = $('#bc_in').value.replace(/\D/g, ''); if (v.length < 6) return toast('Enter the full barcode number'); gotCode(v); };
   if (!has) return;
   try {
-    let formats = ['ean_13','ean_8','upc_a','upc_e'];
-    try { const sup = await BarcodeDetector.getSupportedFormats(); formats = formats.filter(f => sup.includes(f)); } catch {}
-    const det = formats.length ? new BarcodeDetector({formats}) : new BarcodeDetector();
+    const det = await makeDetector();
     stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
     const v = $('#sv'); if (!v){ stopCam(); return; }
     v.srcObject = stream; await v.play();
@@ -1276,7 +1308,7 @@ async function scanSheet(){
       scanTimer = setTimeout(tick, 200);
     };
     tick();
-  } catch (err) { toast('Camera unavailable. Type the number instead.'); }
+  } catch (err) { stopCam(); toast(/load/i.test(err?.message) ? 'Barcode reader unavailable. Type the number instead.' : 'Camera unavailable. Type the number instead.'); }
 }
 async function gotCode(code){ closeSheet(); await handleBarcode(code); }
 async function handleBarcode(code){
@@ -1617,6 +1649,7 @@ function renderSettings(){
     <p class="hint">Used throughout the app: body weight, height, food amounts, and the times you log or edit food. Food nutrition is always in grams.</p></div>
   <div class="card"><h2>Backup</h2>
     <p class="hint">Your log lives only on this phone. Export a backup now and then, and import it if you switch phones.</p>
+    <p class="hint">Last backup: <b>${S.lastBackup ? ago(S.lastBackup) : 'never'}</b>. <span id="persist_st"></span></p>
     <div class="btns"><button id="ex_go">Export backup</button><button id="im_go">Import backup</button></div></div>
   <div class="card privacy"><h2>Your privacy</h2>
     <p class="hint">ChowLog is built to keep your information with you.</p>
@@ -1672,6 +1705,7 @@ function renderSettings(){
   $('#un_sel').onchange = async ev => { S.units = ev.target.value; await saveSettings(); toast('Units saved'); renderSettings(); };
   $('#tf_sel').onchange = async ev => { S.timeFmt = ev.target.value; await saveSettings(); toast('Time format saved'); renderSettings(); };
   $('#ex_go').onclick = exportData;
+  navigator.storage?.persisted?.().then(p => { if ($('#persist_st')) $('#persist_st').textContent = p ? 'This phone has marked ChowLog\'s storage as protected.' : 'Storage isn\'t marked as protected yet, so backups matter even more.'; }).catch(() => {});
   $('#im_go').onclick = () => $('#importInput').click();
   $('#wipe').onclick = async () => {
     if (!confirm('Erase every entry, favorite, weight and setting on this phone? This cannot be undone.')) return;
@@ -1680,6 +1714,12 @@ function renderSettings(){
   };
 }
 const STORES = ['entries','favorites','products','weights','photos','kv'];
+const ago = t => { const d = Math.floor((Date.now() - t) / 864e5); return d <= 0 ? 'today' : d === 1 ? 'yesterday' : d + ' days ago'; };
+async function backupDue(){
+  if (S.backupSnooze && Date.now() < S.backupSnooze) return false;
+  if (S.lastBackup && Date.now() - S.lastBackup < 7 * 864e5) return false;
+  const n = await tx('entries', 'readonly', st => st.count()); return n >= 5; // only once there's something worth saving
+}
 async function exportData(){
   const out = {app:'chowlog', v:1, exported:new Date().toISOString()};
   for (const s of STORES) out[s] = await idb.all(s);
@@ -1688,6 +1728,7 @@ async function exportData(){
   a.href = URL.createObjectURL(new Blob([JSON.stringify(out)], {type:'application/json'}));
   a.download = `chowlog-backup-${todayStr()}.json`; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000); toast('Backup exported');
+  S.lastBackup = Date.now(); S.backupSnooze = 0; await saveSettings(); if (curTab === 'settings') renderSettings(); else refresh();
 }
 $('#importInput').onchange = async ev => {
   const file = ev.target.files[0]; ev.target.value = ''; if (!file) return;
@@ -1799,6 +1840,8 @@ document.addEventListener('click', ev => {
     case 'manual': manualSheet(); break;
     case 'describe': describeSheet(); break;
     case 'flexon': setFlexToday(true); break;
+    case 'bknow': exportData(); break;
+    case 'bklater': S.backupSnooze = Date.now() + 2 * 864e5; saveSettings(); refresh(); break;
     case 'inbody': choosePhoto({type:'inbody'}); break;
     case 'ibopen': inbodyReview(d.id); break;
     case 'flexoff': setFlexToday(false); break;

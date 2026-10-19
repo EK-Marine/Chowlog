@@ -61,6 +61,7 @@ h3{font-size:15px;color:var(--mute);font-weight:600;margin:22px 4px 8px}
 .fxbadge{display:inline-block;font-size:12px;font-weight:700;padding:3px 10px;border-radius:12px;background:hsl(272,45%,58%);color:#fff;margin-bottom:10px}
 .warn{color:var(--signal);font-weight:600}
 .bkup{border-color:var(--coyote)}.bkup b{font-size:16px}
+.bkf{display:flex;justify-content:space-between;gap:10px;font-size:14px;padding:6px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-top:8px}.bkf span{color:var(--mute)}
 .fxl{color:var(--headink);opacity:.85;padding:10px 0 0;font-size:13px;text-decoration:underline}
 .macros{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .mac small{display:block;font-size:12px;opacity:.75}
@@ -390,7 +391,7 @@ const idb = {
 };
 
 /* ---------- settings & state ---------- */
-const DEFAULTS = {cal:2200, p:160, c:220, f:70, apiKey:'', model:'claude-sonnet-5-5', timeFmt:'12', units:'imperial'};
+const DEFAULTS = {cal:2200, p:160, c:220, f:70, apiKey:'', model:'claude-sonnet-5-5', timeFmt:'12', units:'imperial', autoBackup:true};
 let S = {...DEFAULTS};
 async function loadSettings(){ const r = await idb.get('kv','settings'); S = {...DEFAULTS, ...(r ? r.v : {})}; }
 const saveSettings = () => idb.put('kv', {k:'settings', v:S});
@@ -602,7 +603,10 @@ async function renderToday(){
     <div class="macros">${macro('Protein',t.p,T.p,'p')}${macro('Carbs',t.c,T.c,'c')}${macro('Fat',t.f,T.f,'f')}</div>
     ${flexLink}
   </div>`;
-  if (isToday && await backupDue()) h += `<div class="card bkup"><b>Back up your log</b>
+  if (isToday && canPickFolder && !bkDir && !(S.folderSnooze > Date.now()) && await tx('entries', 'readonly', st => st.count()) >= 1) h += `<div class="card bkup"><b>Protect your log</b>
+    <p class="hint">Choose a backup folder, such as Documents/ChowLog Backups, and ChowLog will save a copy there every day. It stays safe even if the browser clears this app's data.</p>
+    <div class="btns"><button data-act="fdlater">Later</button><button class="primary" data-act="fdpick">Choose folder</button></div></div>`;
+  else if (isToday && await backupDue()) h += `<div class="card bkup"><b>Back up your log</b>
     <p class="hint">ChowLog keeps everything on this phone only. ${S.lastBackup ? `Your last backup was ${ago(S.lastBackup)}.` : "You haven't made a backup yet."} A backup file protects you if the phone's storage is cleared.</p>
     <div class="btns"><button data-act="bklater">Later</button><button class="primary" data-act="bknow">Back up now</button></div></div>`;
   h += `<div class="card meal"><div class="mh"><b>Food log</b><span>${es.length} ${es.length === 1 ? 'item' : 'items'}</span><button class="mini" data-act="addto">Add</button></div>`;
@@ -1398,6 +1402,7 @@ window.addEventListener('offline', updateBadge);
 let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') { hiddenAt = Date.now(); return; }
+  armAutoBackup().catch(() => {});
   if (hiddenAt && Date.now() - hiddenAt > 15*60000 && (logTime || logDate)) { logTime = null; logDate = null; curMeal = defaultMeal(); }
   const t = todayStr(); if (t !== lastToday){ if (curDate === lastToday) curDate = t; lastToday = t; }
   processQueue(); refresh();
@@ -1536,7 +1541,8 @@ function renderSetup(){
   if (s === 0) h = `<h2>Welcome to ChowLog</h2>
     <p>Log food by photo, barcode, nutrition label, search or a quick description. It works even with no signal, and your log stays on your phone.</p>
     <p>First, let's set your daily calorie and protein targets. It takes about a minute.</p>
-    <div class="btns"><button data-act="obskip">I'll set them myself</button><button class="primary" data-act="obnext">Estimate my targets</button></div>`;
+    <div class="btns"><button data-act="obskip">I'll set them myself</button><button class="primary" data-act="obnext">Estimate my targets</button></div>
+    <p class="hint" style="margin-top:16px">Used ChowLog before? <button class="link" data-act="obrestore" style="padding:0">Restore from a backup</button>. Look in your backup folder (such as Documents/ChowLog Backups) or Downloads for chowlog-backup-….json.</p>`;
   else if (s === 1) h = `${dots}<h2>About you</h2><p class="hint">Used only to estimate your calorie needs. Stays on this phone.</p>
     <div class="seg">${obChoice('units','imperial','Imperial','lb, ft/in')}${obChoice('units','metric','Metric','kg, cm')}</div>
     <div class="seg">${obChoice('sex','m','Male')}${obChoice('sex','f','Female')}</div>
@@ -1650,7 +1656,14 @@ function renderSettings(){
   <div class="card"><h2>Backup</h2>
     <p class="hint">Your log lives only on this phone. Export a backup now and then, and import it if you switch phones.</p>
     <p class="hint">Last backup: <b>${S.lastBackup ? ago(S.lastBackup) : 'never'}</b>. <span id="persist_st"></span></p>
-    <div class="btns"><button id="ex_go">Export backup</button><button id="im_go">Import backup</button></div></div>
+    ${canPickFolder ? `<div class="bkf"><span>Backup folder</span><b>${bkDir ? esc(bkDir.name) : 'Not chosen (using Downloads)'}</b></div>
+      <div class="btns" style="margin-top:6px"><button id="bk_dir">${bkDir ? 'Change folder' : 'Choose backup folder'}</button></div>
+      <p class="hint">Pick or create a folder such as <b>Documents/ChowLog Backups</b>. Backups saved there stay safe even if the browser clears ChowLog's data. The 30 newest daily backups are kept, plus <b>chowlog-backup-latest.json</b>.</p>` : ''}
+    ${isIOS ? '<p class="hint">Automatic backups aren\'t available on iPhone, so ChowLog reminds you instead. Use “Share backup” to save a copy to Files or iCloud Drive.</p>'
+      : `<label class="chk"><input type="checkbox" id="ab_on" ${S.autoBackup ? 'checked' : ''}> Automatic daily backup</label>
+         <p class="hint" style="margin-top:4px">Saves a backup the first time you tap in ChowLog each day, but only if something changed${bkDir ? '' : '. Without a backup folder it goes to Downloads'}.</p>`}
+    <div class="btns"><button id="ex_go">Back up now</button><button id="sh_go">Share backup</button><button id="im_go">Restore backup</button></div>
+    <p class="hint">“Share backup” lets you send a copy to Google Drive or email, so it's safe even if you lose the phone.</p></div>
   <div class="card privacy"><h2>Your privacy</h2>
     <p class="hint">ChowLog is built to keep your information with you.</p>
     <details open><summary>Your food log stays on this phone</summary>
@@ -1705,30 +1718,103 @@ function renderSettings(){
   $('#un_sel').onchange = async ev => { S.units = ev.target.value; await saveSettings(); toast('Units saved'); renderSettings(); };
   $('#tf_sel').onchange = async ev => { S.timeFmt = ev.target.value; await saveSettings(); toast('Time format saved'); renderSettings(); };
   $('#ex_go').onclick = exportData;
+  $('#sh_go').onclick = shareBackup;
+  if ($('#bk_dir')) $('#bk_dir').onclick = async () => { if (await chooseBkFolder()) { await exportData(); renderSettings(); } };
+  if ($('#ab_on')) $('#ab_on').onchange = async ev => { S.autoBackup = ev.target.checked; await saveSettings(); toast(S.autoBackup ? 'Daily backup on' : 'Daily backup off'); armAutoBackup().catch(() => {}); };
   navigator.storage?.persisted?.().then(p => { if ($('#persist_st')) $('#persist_st').textContent = p ? 'This phone has marked ChowLog\'s storage as protected.' : 'Storage isn\'t marked as protected yet, so backups matter even more.'; }).catch(() => {});
   $('#im_go').onclick = () => $('#importInput').click();
   $('#wipe').onclick = async () => {
     if (!confirm('Erase every entry, favorite, weight and setting on this phone? This cannot be undone.')) return;
     for (const s of ['entries','favorites','products','weights','photos','kv']) await idb.replace(s, []);
-    await loadSettings(); await loadBody(); toast('All data erased'); refresh();
+    await loadSettings(); await loadBody(); await loadBkDir(); toast('All data erased'); refresh();
   };
 }
 const STORES = ['entries','favorites','products','weights','photos','kv'];
 const ago = t => { const d = Math.floor((Date.now() - t) / 864e5); return d <= 0 ? 'today' : d === 1 ? 'yesterday' : d + ' days ago'; };
 async function backupDue(){
   if (S.backupSnooze && Date.now() < S.backupSnooze) return false;
-  if (S.lastBackup && Date.now() - S.lastBackup < 7 * 864e5) return false;
+  if (S.lastBackup && Date.now() - S.lastBackup < (S.autoBackup && !isIOS ? 3 : 7) * 864e5) return false;
   const n = await tx('entries', 'readonly', st => st.count()); return n >= 5; // only once there's something worth saving
 }
-async function exportData(){
+const BK_META = ['lastBackup', 'backupSnooze', 'lastAutoDay', 'lastBackupHash']; // bookkeeping, not part of what's compared
+async function buildBackup(){
   const out = {app:'chowlog', v:1, exported:new Date().toISOString()};
   for (const s of STORES) out[s] = await idb.all(s);
-  out.kv = out.kv.map(r => r.k === 'settings' ? {...r, v:{...r.v, apiKey:''}} : r); // never export the key
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([JSON.stringify(out)], {type:'application/json'}));
-  a.download = `chowlog-backup-${todayStr()}.json`; document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000); toast('Backup exported');
-  S.lastBackup = Date.now(); S.backupSnooze = 0; await saveSettings(); if (curTab === 'settings') renderSettings(); else refresh();
+  out.kv = out.kv.filter(r => r.k !== 'bkdir').map(r => r.k === 'settings' ? {...r, v:{...r.v, apiKey:''}} : r); // never export the key or folder
+  // Fingerprint of the content, so an unchanged log isn't saved again
+  const body = JSON.stringify({...out, exported:0, kv:out.kv.map(r => r.k === 'settings' ? {...r, v:Object.fromEntries(Object.entries(r.v).filter(([k]) => !BK_META.includes(k)))} : r)});
+  let x = 2166136261; for (let i = 0; i < body.length; i++) { x ^= body.charCodeAt(i); x = Math.imul(x, 16777619); }
+  return {blob:new Blob([JSON.stringify(out)], {type:'application/json'}), hash:(x >>> 0).toString(36) + '.' + body.length};
+}
+function saveBlob(blob, name){
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+/* Backup folder: on Chrome for Android 132+ and desktop Chrome, you pick a folder once (e.g. Documents/ChowLog Backups)
+   and backups are written there directly. Files in that folder survive even if the browser clears ChowLog's data. */
+const canPickFolder = 'showDirectoryPicker' in window;
+let bkDir = null; // FileSystemDirectoryHandle, kept in the kv store (not in backups)
+async function loadBkDir(){ try { const r = await idb.get('kv', 'bkdir'); bkDir = r?.v || null; } catch { bkDir = null; } }
+async function chooseBkFolder(){
+  try {
+    const d = await window.showDirectoryPicker({id:'chowlog-backups', mode:'readwrite', startIn:'documents'});
+    bkDir = d; await idb.put('kv', {k:'bkdir', v:d});
+    toast(`Backups will be saved to “${d.name}”`); return true;
+  } catch (e) { if (e?.name !== 'AbortError') toast("That folder couldn't be used. Try another, such as Documents."); return false; }
+}
+// Must run during a tap (permission prompt). Returns true if the file was written to the folder.
+async function writeToFolder(blob, name){
+  if (!bkDir) return false;
+  try {
+    let perm = await bkDir.queryPermission?.({mode:'readwrite'});
+    if (perm !== 'granted') perm = await bkDir.requestPermission?.({mode:'readwrite'});
+    if (perm && perm !== 'granted') return false;
+    for (const n of [name, 'chowlog-backup-latest.json']) {
+      const w = await (await bkDir.getFileHandle(n, {create:true})).createWritable(); await w.write(blob); await w.close();
+    }
+    pruneFolder().catch(() => {});
+    return true;
+  } catch { return false; }
+}
+async function pruneFolder(){ // keep the 30 newest daily files
+  const names = []; for await (const [n, hd] of bkDir.entries()) if (hd.kind === 'file' && /^chowlog-backup-\d{4}-\d{2}-\d{2}\.json$/.test(n)) names.push(n);
+  names.sort().reverse(); for (const n of names.slice(30)) await bkDir.removeEntry(n);
+}
+// Saves a backup: to the chosen folder if there is one, otherwise to Downloads. Returns where it went.
+async function storeBackup(blob){
+  const name = `chowlog-backup-${todayStr()}.json`;
+  if (await writeToFolder(blob, name)) return `“${bkDir.name}”`;
+  saveBlob(blob, name); return 'Downloads';
+}
+async function shareBackup(){
+  const {blob} = await buildBackup(), f = new File([blob], `chowlog-backup-${todayStr()}.json`, {type:'application/json'});
+  if (navigator.canShare?.({files:[f]})) { try { await navigator.share({files:[f], title:'ChowLog backup'}); } catch {} }
+  else { saveBlob(blob, f.name); toast('Saved to Downloads. Upload it to Google Drive from there.'); }
+}
+async function markBackedUp(hash){ Object.assign(S, {lastBackup:Date.now(), backupSnooze:0, lastAutoDay:todayStr(), lastBackupHash:hash}); await saveSettings(); }
+async function exportData(){
+  const {blob, hash} = await buildBackup();
+  toast(`Backup saved to ${await storeBackup(blob)}`);
+  await markBackedUp(hash); if (curTab === 'settings') renderSettings(); else refresh();
+}
+/* Daily automatic backup: browsers only allow saving a file right after a tap, so the backup is
+   prepared in advance and saved on the first tap of the day. Skipped when nothing has changed. */
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let autoBk = null;
+async function armAutoBackup(){
+  if (autoBk || !S.autoBackup || isIOS || S.lastAutoDay === todayStr()) return;
+  if (!(await tx('entries', 'readonly', st => st.count()))) return; // nothing to protect yet
+  const b = await buildBackup();
+  if (b.hash === S.lastBackupHash) { S.lastAutoDay = todayStr(); return saveSettings(); } // unchanged since the last backup
+  autoBk = b;
+  document.addEventListener('click', runAutoBackup, {capture:true, once:true});
+}
+async function runAutoBackup(ev){
+  // A tap that's choosing the backup folder backs up there itself; wait for the next tap instead
+  if (ev?.target?.closest?.('[data-act=fdpick], #bk_dir')) return document.addEventListener('click', runAutoBackup, {capture:true, once:true});
+  const b = autoBk; autoBk = null; if (!b || S.lastAutoDay === todayStr()) return;
+  const where = await storeBackup(b.blob);
+  await markBackedUp(b.hash); toast(`Daily backup saved to ${where}`); if (curTab === 'settings') renderSettings();
 }
 $('#importInput').onchange = async ev => {
   const file = ev.target.files[0]; ev.target.value = ''; if (!file) return;
@@ -1736,9 +1822,12 @@ $('#importInput').onchange = async ev => {
     const d = JSON.parse(await file.text()); if (d.app !== 'chowlog') throw new Error();
     if (!confirm('Replace everything on this phone with this backup?')) return;
     const key = S.apiKey;
-    for (const s of STORES) await idb.replace(s, d[s] || []);
+    for (const s of STORES) await idb.replace(s, (d[s] || []).filter(r => s !== 'kv' || r.k !== 'bkdir'));
+    if (bkDir) await idb.put('kv', {k:'bkdir', v:bkDir});
     await loadSettings(); await loadBody(); if (!S.apiKey && key){ S.apiKey = key; await saveSettings(); }
-    toast('Backup imported'); refresh();
+    if (ob) { ob = null; closeSheet(); }
+    S.setupDone = true; await saveSettings();
+    toast(`Backup restored: ${(d.entries || []).length} food entries`); refresh();
   } catch { toast("That file isn't a ChowLog backup"); }
 };
 
@@ -1841,12 +1930,15 @@ document.addEventListener('click', ev => {
     case 'describe': describeSheet(); break;
     case 'flexon': setFlexToday(true); break;
     case 'bknow': exportData(); break;
+    case 'fdpick': chooseBkFolder().then(ok => ok && exportData()); break;
+    case 'fdlater': S.folderSnooze = Date.now() + 3 * 864e5; saveSettings(); refresh(); break;
     case 'bklater': S.backupSnooze = Date.now() + 2 * 864e5; saveSettings(); refresh(); break;
     case 'inbody': choosePhoto({type:'inbody'}); break;
     case 'ibopen': inbodyReview(d.id); break;
     case 'flexoff': setFlexToday(false); break;
     case 'obset': if (ob) { obRead(); if (d.f === 'units') { S.units = d.v; saveSettings(); if (ob.goal === 'lose') ob.pace = nearestPace(ob.pace); } ob[d.f] = isNaN(+d.v) ? d.v : +d.v; if (d.f === 'goal') { ob.pace = d.v === 'lose' ? PACE.lose[1][0] : d.v === 'gain' ? 250 : 0; ob.pf = PF_DEFAULT[d.v]; } renderSetup(); } break;
     case 'obnext': if (ob) obNext(); break;
+    case 'obrestore': $('#importInput').click(); break;
     case 'obback': if (ob) { obRead(); ob.step--; renderSetup(); } break;
     case 'obskip': if (ob) { S.setupDone = true; saveSettings(); ob = null; closeSheet(); showTab('settings'); toast('Enter your targets here anytime'); } break;
     case 'obdone': if (ob) { if (d.key && $('#ob_key').value.trim()) { S.apiKey = $('#ob_key').value.trim(); saveSettings(); } ob = null; closeSheet(); refresh(); } break;
@@ -1883,13 +1975,14 @@ document.addEventListener('keydown', ev => {
 
 (async () => {
   const firstRun = !(await idb.get('kv', 'settings'));
-  await loadSettings(); await loadBody();
+  await loadSettings(); await loadBody(); await loadBkDir();
   try { // one-time move of entries from the old single "Snacks" section into morning/afternoon/evening snacks
     for (const e of (await idb.all('entries')).filter(e => e.meal === 'snack')) { const m = mealForTime(entTime(e)); e.meal = SNACKS.has(m) ? m : {breakfast:'snack_am', lunch:'snack_pm', dinner:'snack_eve'}[m]; await idb.put('entries', e); }
   } catch {}
   try { await navigator.storage?.persist?.(); } catch {}
   showTab('today');
   if (firstRun) openSetup(true);
+  armAutoBackup().catch(() => {});
   processQueue();
   if ('serviceWorker' in navigator) {
     // When a new version installs, reload once so it shows immediately instead of on the next launch.

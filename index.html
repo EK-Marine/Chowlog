@@ -60,8 +60,6 @@ h3{font-size:15px;color:var(--mute);font-weight:600;margin:22px 4px 8px}
 .segs i.fx{background:hsl(272,45%,58%);opacity:.55}
 .fxbadge{display:inline-block;font-size:12px;font-weight:700;padding:3px 10px;border-radius:12px;background:hsl(272,45%,58%);color:#fff;margin-bottom:10px}
 .warn{color:var(--signal);font-weight:600}
-.bkup{border-color:var(--coyote)}.bkup b{font-size:16px}
-.bkf{display:flex;justify-content:space-between;gap:10px;font-size:14px;padding:6px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-top:8px}.bkf span{color:var(--mute)}
 .fxl{color:var(--headink);opacity:.85;padding:10px 0 0;font-size:13px;text-decoration:underline}
 .macros{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .mac small{display:block;font-size:12px;opacity:.75}
@@ -159,9 +157,6 @@ h3.hrow{display:flex;align-items:center;justify-content:space-between}
 .obdots{display:flex;gap:6px;margin-bottom:12px}.obdots i{flex:1;height:4px;border-radius:2px;background:var(--line)}.obdots i.on{background:var(--coyote)}
 .obres{text-align:center;margin:6px 0 10px}.obres span{display:block;font-size:46px;font-weight:800;letter-spacing:-1px;font-variant-numeric:tabular-nums}
 .obres small{color:var(--mute)}
-.ppgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:4px 0 6px}
-.ppimg{padding:0;border:2px solid transparent;border-radius:8px;overflow:hidden;background:#fff;aspect-ratio:1}
-.ppimg img{width:100%;height:100%;object-fit:cover;display:block}.ppimg.on{border-color:var(--coyote)}
 .pick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:4px 0 8px}
 .act.primary-act small{color:var(--headink);opacity:.7}
 
@@ -340,17 +335,7 @@ async function productThumb(p){ // stores a small copy so the photo shows offlin
   if (p.thumb || !p.image) return p.thumb || null;
   const t = await cacheThumb(p.image); if (t) { p.thumb = t; await idb.put('products', p); } return t;
 }
-// Stock photos: search Wikimedia Commons (Wikipedia's photo library) for a specific description of one serving.
-async function stockPhotos(term, n = 9){
-  if (!term) return [];
-  const q = encodeURIComponent(term + ' -drawing -illustration -diagram -logo filetype:bitmap');
-  const r = await fetch(`https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrnamespace=6&gsrlimit=${n + 6}&gsrsearch=${q}&prop=imageinfo&iiprop=url|mime&iiurlwidth=320`);
-  if (!r.ok) throw new HttpErr(r.status, 'Photo search error');
-  return Object.values((await r.json()).query?.pages || {}).sort((a, b) => a.index - b.index)
-    .map(p => p.imageinfo?.[0]).filter(i => i?.thumburl && /jpe?g|png|webp/.test(i.mime || '')).slice(0, n).map(i => i.thumburl);
-}
 async function wikiThumb(term){
-  try { const u = (await stockPhotos(term, 1))[0]; if (u) return (await cacheThumb(u)) || u; } catch {}
   try {
     if (!term) return null;
     const r = await fetch('https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&prop=pageimages&piprop=thumbnail&pithumbsize=240&generator=search&gsrlimit=1&gsrsearch=' + encodeURIComponent(term));
@@ -404,7 +389,7 @@ const idb = {
 };
 
 /* ---------- settings & state ---------- */
-const DEFAULTS = {cal:2200, p:160, c:220, f:70, apiKey:'', model:'claude-sonnet-5-5', timeFmt:'12', units:'imperial', autoBackup:true};
+const DEFAULTS = {cal:2200, p:160, c:220, f:70, apiKey:'', model:'claude-sonnet-5-5', timeFmt:'12', units:'imperial'};
 let S = {...DEFAULTS};
 async function loadSettings(){ const r = await idb.get('kv','settings'); S = {...DEFAULTS, ...(r ? r.v : {})}; }
 const saveSettings = () => idb.put('kv', {k:'settings', v:S});
@@ -616,12 +601,6 @@ async function renderToday(){
     <div class="macros">${macro('Protein',t.p,T.p,'p')}${macro('Carbs',t.c,T.c,'c')}${macro('Fat',t.f,T.f,'f')}</div>
     ${flexLink}
   </div>`;
-  if (isToday && canPickFolder && !bkDir && !(S.folderSnooze > Date.now()) && await tx('entries', 'readonly', st => st.count()) >= 1) h += `<div class="card bkup"><b>Protect your log</b>
-    <p class="hint">Choose a backup folder, such as Documents/ChowLog Backups, and ChowLog will save a copy there every day. It stays safe even if the browser clears this app's data.</p>
-    <div class="btns"><button data-act="fdlater">Later</button><button class="primary" data-act="fdpick">Choose folder</button></div></div>`;
-  else if (isToday && await backupDue()) h += `<div class="card bkup"><b>Back up your log</b>
-    <p class="hint">ChowLog keeps everything on this phone only. ${S.lastBackup ? `Your last backup was ${ago(S.lastBackup)}.` : "You haven't made a backup yet."} A backup file protects you if the phone's storage is cleared.</p>
-    <div class="btns"><button data-act="bklater">Later</button><button class="primary" data-act="bknow">Back up now</button></div></div>`;
   h += `<div class="card meal"><div class="mh"><b>Food log</b><span>${es.length} ${es.length === 1 ? 'item' : 'items'}</span><button class="mini" data-act="addto">Add</button></div>`;
   h += es.length ? es.map(entryRow).join('') : `<div class="empty">Nothing logged ${curDate === todayStr() ? 'yet today' : 'this day'}.</div>`;
   h += `</div>`;
@@ -817,37 +796,10 @@ function manualSheet(pre = {}){
   };
 }
 
-// Pick a different photo for an entry: stock photos, your own photo, or none.
-async function photoPicker(e){
-  const name = e.name.replace(/\s*\([^)]*\)\s*$/, '').replace(/^(.*?)( ×\d.*)$/, '$1');
-  sheet(`<h2>Choose a photo</h2>
-    <div class="srow"><input id="pp_q" value="${esc(name)}" enterkeyhint="search" autocomplete="off"><button id="pp_go">Search</button></div>
-    <p class="hint">Tip: describe one serving, like “peeled hard boiled egg” or “single banana”.</p>
-    <div id="pp_res" class="ppgrid"></div>
-    <div class="btns"><button id="pp_own">Use my own photo</button>${e.thumb ? '<button class="danger" id="pp_none">Remove photo</button>' : ''}<button data-act="close">Cancel</button></div>`);
-  const save = async thumb => { e.thumb = thumb || undefined; await idb.put('entries', e); toast(thumb ? 'Photo updated' : 'Photo removed'); refresh(); entrySheet(e.id); };
-  const run = async () => {
-    const q = $('#pp_q').value.trim(); if (!q) return;
-    const box = $('#pp_res');
-    if (!navigator.onLine) { box.innerHTML = '<p class="hint">Photo search needs a connection. You can still use your own photo.</p>'; return; }
-    box.innerHTML = '<p class="hint">Searching…</p>';
-    try {
-      const urls = await stockPhotos(q, 9); if (!$('#pp_res')) return;
-      box.innerHTML = urls.length ? urls.map((u, i) => `<button class="ppimg" data-i="${i}"><img src="${u}" alt="" loading="lazy" onerror="this.parentNode.remove()"></button>`).join('')
-        : '<p class="hint">No photos found. Try different words.</p>';
-      box.querySelectorAll('.ppimg').forEach(b => b.onclick = async () => { b.classList.add('on'); await save((await cacheThumb(urls[+b.dataset.i])) || urls[+b.dataset.i]); });
-    } catch { if ($('#pp_res')) box.innerHTML = '<p class="hint">Photo search failed. Try again in a moment.</p>'; }
-  };
-  $('#pp_go').onclick = run; $('#pp_q').onkeydown = ev => { if (ev.key === 'Enter') run(); };
-  $('#pp_own').onclick = () => { closeSheet(); photoMode = {type:'thumbfor', id:e.id}; choosePhoto({type:'thumbfor', id:e.id}); };
-  if ($('#pp_none')) $('#pp_none').onclick = () => save(null);
-  run();
-}
 async function entrySheet(id){
   const e = await idb.get('entries', id); if (!e) return;
   let h = `<h2>${e.status === 'ok' ? 'Edit entry' : 'Queued entry'}</h2>`;
   if (e.thumb) h += `<img class="prev" src="${e.thumb}" alt="">`;
-  if (e.status === 'ok') h += `<div class="btns" style="margin:-4px 0 10px"><button id="e_photo">${e.thumb ? 'Change photo' : 'Add photo'}</button></div>`;
   if (e.status !== 'ok'){
     if (e.status === 'error') h += `<p class="errbox">${esc(e.error)}</p>`;
     const pt = e.pending?.type, keyNote = S.apiKey ? '.' : ' and an API key is set in Settings.';
@@ -893,7 +845,6 @@ async function entrySheet(id){
         <div class="btns"><button class="primary" id="e_recalc">Recalculate</button></div></details>`}
       <div class="btns"><button class="danger" id="e_del">Delete</button><button id="e_fav">Favorite</button>${e.date !== todayStr() ? '<button id="e_copy">Log today</button>' : ''}<button class="primary" id="e_save">Save</button></div>`;
     sheet(h);
-    $('#e_photo').onclick = () => photoPicker(e);
     const read = () => { const v = readMacros('e_'), k = amtOf('e_scale') || 1; return {...v, cal:v.cal*k, p:v.p*k, c:v.c*k, f:v.f*k}; };
     // Changing the time moves the item to the meal for that time; you can still pick a different meal after.
     const syncMeal = () => { const t = readTime('e_time'); if (t) $('#e_meal').value = mealForTime(t); };
@@ -964,7 +915,7 @@ function toJpeg(img, max, q){
 let photoMode = {type:'meal'};
 function scanLabelFor(code){ choosePhoto({type:'label', code}); }
 function choosePhoto(mode){
-  sheet(`<h2>${mode.type === 'label' ? 'Nutrition Label' : mode.type === 'inbody' ? 'InBody result' : mode.type === 'thumbfor' ? 'Your photo' : 'Meal photo'}</h2>
+  sheet(`<h2>${mode.type === 'label' ? 'Nutrition Label' : mode.type === 'inbody' ? 'InBody result' : 'Meal photo'}</h2>
     ${mode.type === 'inbody' ? '<p class="hint">Photograph the whole sheet flat, in good light, or choose a screenshot of the InBody app or results website.</p>' : ''}
     <div class="pick"><button class="act primary-act" id="pk_cam"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4.5 7h3l1.7-2.5h5.6L16.5 7h3a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/><circle cx="12" cy="13.5" r="3.8"/></g><circle cx="18.2" cy="10" r="1" fill="currentColor"/></svg></span>Take a photo</button>
     <button class="act" id="pk_gal"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><rect x="2.5" y="4" width="19" height="16" rx="2"/><path d="M3.5 18l5.5-5.5 4 4 2.5-2.5 5 5"/></g><circle cx="15.5" cy="9" r="1.7" fill="currentColor"/></svg></span>Choose from gallery</button></div>
@@ -1007,7 +958,6 @@ $('#photoInput').onchange = async ev => {
   catch { return toast('That photo could not be read. Try again.'); }
   if (mode.type === 'label') return labelSheet(full, thumb, mode.code);
   if (mode.type === 'inbody') return inbodyStart(full, thumb);
-  if (mode.type === 'thumbfor') { const e = await idb.get('entries', mode.id); if (e) { e.thumb = thumb; await idb.put('entries', e); toast('Photo updated'); refresh(); entrySheet(e.id); } return; }
   const now = navigator.onLine && S.apiKey;
   // For a gallery photo, offer the time it was taken (unless a date/time was already chosen).
   let taken = null;
@@ -1083,7 +1033,7 @@ function describeSheet(){
 const TEXT_SYS = `You estimate nutrition for foods described in text, for a calorie tracker. Split the description into its distinct items.
 If an item is a restaurant chain menu item or a packaged brand product, use that company's published nutrition information for the standard item, including default dressings, sauces and toppings unless the user says otherwise. If a web search tool is available, use it to look up the official numbers for chain or brand items. Otherwise estimate typical portions.
 Your final answer must be ONLY a JSON object, no markdown, in this shape:
-{"meal_name":"short name","photo_term":"photo search phrase showing ONE typical serving as eaten, e.g. 'peeled hard boiled egg', 'single banana', 'chicken caesar salad bowl'","items":[{"name":"food","portion":"e.g. full size","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0}],"confidence":"low|medium|high","source":"published|estimate","notes":"one short sentence on assumptions"}`;
+{"meal_name":"short name","photo_term":"2-3 word generic name of the main dish for a stock photo, e.g. chicken salad","items":[{"name":"food","portion":"e.g. full size","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0}],"confidence":"low|medium|high","source":"published|estimate","notes":"one short sentence on assumptions"}`;
 async function resolveText(e){
   const content = 'Estimate the nutrition for: ' + e.pending.desc;
   const WEB_LOOKUP = false; // set true to let Claude search the web for official chain/brand nutrition (about 1¢ per lookup)
@@ -1305,46 +1255,18 @@ async function runSearch(q){
 
 let stream = null, scanTimer = null;
 function stopCam(){ clearTimeout(scanTimer); if (stream){ stream.getTracks().forEach(t => t.stop()); stream = null; } }
-// Barcode reading: Chrome's built-in BarcodeDetector when available; otherwise the bundled ZXing library (iPhone/Safari).
-let zxingP = null;
-function loadZXing(){
-  return zxingP ||= new Promise((res, rej) => {
-    if (window.ZXing) return res(window.ZXing);
-    const s = document.createElement('script'); s.src = 'zxing.min.js';
-    s.onload = () => window.ZXing ? res(window.ZXing) : rej(new Error('no ZXing'));
-    s.onerror = () => { zxingP = null; rej(new Error('Barcode reader failed to load')); };
-    document.head.appendChild(s);
-  });
-}
-async function makeDetector(){
-  if ('BarcodeDetector' in window) {
-    let formats = ['ean_13','ean_8','upc_a','upc_e'];
-    try { const sup = await BarcodeDetector.getSupportedFormats(); formats = formats.filter(f => sup.includes(f)); } catch {}
-    if (formats.length) return new BarcodeDetector({formats});
-  }
-  const Z = await loadZXing(), hints = new Map();
-  hints.set(Z.DecodeHintType.POSSIBLE_FORMATS, [Z.BarcodeFormat.EAN_13, Z.BarcodeFormat.EAN_8, Z.BarcodeFormat.UPC_A, Z.BarcodeFormat.UPC_E]);
-  hints.set(Z.DecodeHintType.TRY_HARDER, true);
-  const reader = new Z.MultiFormatReader(); reader.setHints(hints);
-  const c = document.createElement('canvas'), ctx = c.getContext('2d', {willReadFrequently:true});
-  return {detect: async v => {
-    const w = v.videoWidth, hgt = v.videoHeight; if (!w || !hgt) return [];
-    const cw = Math.min(960, w), s = cw / w, ch = Math.round(hgt * 0.5 * s); // middle band, where the reticle is
-    c.width = cw; c.height = ch; ctx.drawImage(v, 0, hgt * 0.25, w, hgt * 0.5, 0, 0, cw, ch);
-    try { return [{rawValue:reader.decode(new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(c)))).getText()}]; }
-    catch { return []; } finally { reader.reset(); }
-  }};
-}
 async function scanSheet(){
-  const has = !!navigator.mediaDevices?.getUserMedia;
+  const has = 'BarcodeDetector' in window;
   sheet(`<h2>Scan a barcode</h2>${has ? `<div class="cam"><video id="sv" playsinline muted></video><div class="reticle"></div></div>`
-      : `<p class="hint">This browser can't use the camera. Type the number under the barcode instead.</p>`}
+      : `<p class="hint">This browser can't scan with the camera. Type the number under the barcode instead.</p>`}
     <label>Or type the number<input id="bc_in" inputmode="numeric" placeholder="012345678905"></label>
     <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="bc_go">Look up</button></div>`, stopCam);
   $('#bc_go').onclick = () => { const v = $('#bc_in').value.replace(/\D/g, ''); if (v.length < 6) return toast('Enter the full barcode number'); gotCode(v); };
   if (!has) return;
   try {
-    const det = await makeDetector();
+    let formats = ['ean_13','ean_8','upc_a','upc_e'];
+    try { const sup = await BarcodeDetector.getSupportedFormats(); formats = formats.filter(f => sup.includes(f)); } catch {}
+    const det = formats.length ? new BarcodeDetector({formats}) : new BarcodeDetector();
     stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}});
     const v = $('#sv'); if (!v){ stopCam(); return; }
     v.srcObject = stream; await v.play();
@@ -1354,7 +1276,7 @@ async function scanSheet(){
       scanTimer = setTimeout(tick, 200);
     };
     tick();
-  } catch (err) { stopCam(); toast(/load/i.test(err?.message) ? 'Barcode reader unavailable. Type the number instead.' : 'Camera unavailable. Type the number instead.'); }
+  } catch (err) { toast('Camera unavailable. Type the number instead.'); }
 }
 async function gotCode(code){ closeSheet(); await handleBarcode(code); }
 async function handleBarcode(code){
@@ -1444,7 +1366,6 @@ window.addEventListener('offline', updateBadge);
 let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') { hiddenAt = Date.now(); return; }
-  armAutoBackup().catch(() => {});
   if (hiddenAt && Date.now() - hiddenAt > 15*60000 && (logTime || logDate)) { logTime = null; logDate = null; curMeal = defaultMeal(); }
   const t = todayStr(); if (t !== lastToday){ if (curDate === lastToday) curDate = t; lastToday = t; }
   processQueue(); refresh();
@@ -1583,8 +1504,7 @@ function renderSetup(){
   if (s === 0) h = `<h2>Welcome to ChowLog</h2>
     <p>Log food by photo, barcode, nutrition label, search or a quick description. It works even with no signal, and your log stays on your phone.</p>
     <p>First, let's set your daily calorie and protein targets. It takes about a minute.</p>
-    <div class="btns"><button data-act="obskip">I'll set them myself</button><button class="primary" data-act="obnext">Estimate my targets</button></div>
-    <p class="hint" style="margin-top:16px">Used ChowLog before? <button class="link" data-act="obrestore" style="padding:0">Restore from a backup</button>. Look in your backup folder (such as Documents/ChowLog Backups) or Downloads for chowlog-backup-….json.</p>`;
+    <div class="btns"><button data-act="obskip">I'll set them myself</button><button class="primary" data-act="obnext">Estimate my targets</button></div>`;
   else if (s === 1) h = `${dots}<h2>About you</h2><p class="hint">Used only to estimate your calorie needs. Stays on this phone.</p>
     <div class="seg">${obChoice('units','imperial','Imperial','lb, ft/in')}${obChoice('units','metric','Metric','kg, cm')}</div>
     <div class="seg">${obChoice('sex','m','Male')}${obChoice('sex','f','Female')}</div>
@@ -1697,15 +1617,7 @@ function renderSettings(){
     <p class="hint">Used throughout the app: body weight, height, food amounts, and the times you log or edit food. Food nutrition is always in grams.</p></div>
   <div class="card"><h2>Backup</h2>
     <p class="hint">Your log lives only on this phone. Export a backup now and then, and import it if you switch phones.</p>
-    <p class="hint">Last backup: <b>${S.lastBackup ? ago(S.lastBackup) : 'never'}</b>. <span id="persist_st"></span></p>
-    ${canPickFolder ? `<div class="bkf"><span>Backup folder</span><b>${bkDir ? esc(bkDir.name) : 'Not chosen (using Downloads)'}</b></div>
-      <div class="btns" style="margin-top:6px"><button id="bk_dir">${bkDir ? 'Change folder' : 'Choose backup folder'}</button></div>
-      <p class="hint">Pick or create a folder such as <b>Documents/ChowLog Backups</b>. Backups saved there stay safe even if the browser clears ChowLog's data. The 30 newest daily backups are kept, plus <b>chowlog-backup-latest.json</b>.</p>` : ''}
-    ${isIOS ? '<p class="hint">Automatic backups aren\'t available on iPhone, so ChowLog reminds you instead. Use “Share backup” to save a copy to Files or iCloud Drive.</p>'
-      : `<label class="chk"><input type="checkbox" id="ab_on" ${S.autoBackup ? 'checked' : ''}> Automatic daily backup</label>
-         <p class="hint" style="margin-top:4px">Saves a backup the first time you tap in ChowLog each day, but only if something changed${bkDir ? '' : '. Without a backup folder it goes to Downloads'}.</p>`}
-    <div class="btns"><button id="ex_go">Back up now</button><button id="sh_go">Share backup</button><button id="im_go">Restore backup</button></div>
-    <p class="hint">“Share backup” lets you send a copy to Google Drive or email, so it's safe even if you lose the phone.</p></div>
+    <div class="btns"><button id="ex_go">Export backup</button><button id="im_go">Import backup</button></div></div>
   <div class="card privacy"><h2>Your privacy</h2>
     <p class="hint">ChowLog is built to keep your information with you.</p>
     <details open><summary>Your food log stays on this phone</summary>
@@ -1760,103 +1672,22 @@ function renderSettings(){
   $('#un_sel').onchange = async ev => { S.units = ev.target.value; await saveSettings(); toast('Units saved'); renderSettings(); };
   $('#tf_sel').onchange = async ev => { S.timeFmt = ev.target.value; await saveSettings(); toast('Time format saved'); renderSettings(); };
   $('#ex_go').onclick = exportData;
-  $('#sh_go').onclick = shareBackup;
-  if ($('#bk_dir')) $('#bk_dir').onclick = async () => { if (await chooseBkFolder()) { await exportData(); renderSettings(); } };
-  if ($('#ab_on')) $('#ab_on').onchange = async ev => { S.autoBackup = ev.target.checked; await saveSettings(); toast(S.autoBackup ? 'Daily backup on' : 'Daily backup off'); armAutoBackup().catch(() => {}); };
-  navigator.storage?.persisted?.().then(p => { if ($('#persist_st')) $('#persist_st').textContent = p ? 'This phone has marked ChowLog\'s storage as protected.' : 'Storage isn\'t marked as protected yet, so backups matter even more.'; }).catch(() => {});
   $('#im_go').onclick = () => $('#importInput').click();
   $('#wipe').onclick = async () => {
     if (!confirm('Erase every entry, favorite, weight and setting on this phone? This cannot be undone.')) return;
     for (const s of ['entries','favorites','products','weights','photos','kv']) await idb.replace(s, []);
-    await loadSettings(); await loadBody(); await loadBkDir(); toast('All data erased'); refresh();
+    await loadSettings(); await loadBody(); toast('All data erased'); refresh();
   };
 }
 const STORES = ['entries','favorites','products','weights','photos','kv'];
-const ago = t => { const d = Math.floor((Date.now() - t) / 864e5); return d <= 0 ? 'today' : d === 1 ? 'yesterday' : d + ' days ago'; };
-async function backupDue(){
-  if (S.backupSnooze && Date.now() < S.backupSnooze) return false;
-  if (S.lastBackup && Date.now() - S.lastBackup < (S.autoBackup && !isIOS ? 3 : 7) * 864e5) return false;
-  const n = await tx('entries', 'readonly', st => st.count()); return n >= 5; // only once there's something worth saving
-}
-const BK_META = ['lastBackup', 'backupSnooze', 'lastAutoDay', 'lastBackupHash']; // bookkeeping, not part of what's compared
-async function buildBackup(){
+async function exportData(){
   const out = {app:'chowlog', v:1, exported:new Date().toISOString()};
   for (const s of STORES) out[s] = await idb.all(s);
-  out.kv = out.kv.filter(r => r.k !== 'bkdir').map(r => r.k === 'settings' ? {...r, v:{...r.v, apiKey:''}} : r); // never export the key or folder
-  // Fingerprint of the content, so an unchanged log isn't saved again
-  const body = JSON.stringify({...out, exported:0, kv:out.kv.map(r => r.k === 'settings' ? {...r, v:Object.fromEntries(Object.entries(r.v).filter(([k]) => !BK_META.includes(k)))} : r)});
-  let x = 2166136261; for (let i = 0; i < body.length; i++) { x ^= body.charCodeAt(i); x = Math.imul(x, 16777619); }
-  return {blob:new Blob([JSON.stringify(out)], {type:'application/json'}), hash:(x >>> 0).toString(36) + '.' + body.length};
-}
-function saveBlob(blob, name){
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
-  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-}
-/* Backup folder: on Chrome for Android 132+ and desktop Chrome, you pick a folder once (e.g. Documents/ChowLog Backups)
-   and backups are written there directly. Files in that folder survive even if the browser clears ChowLog's data. */
-const canPickFolder = 'showDirectoryPicker' in window;
-let bkDir = null; // FileSystemDirectoryHandle, kept in the kv store (not in backups)
-async function loadBkDir(){ try { const r = await idb.get('kv', 'bkdir'); bkDir = r?.v || null; } catch { bkDir = null; } }
-async function chooseBkFolder(){
-  try {
-    const d = await window.showDirectoryPicker({id:'chowlog-backups', mode:'readwrite', startIn:'documents'});
-    bkDir = d; await idb.put('kv', {k:'bkdir', v:d});
-    toast(`Backups will be saved to “${d.name}”`); return true;
-  } catch (e) { if (e?.name !== 'AbortError') toast("That folder couldn't be used. Try another, such as Documents."); return false; }
-}
-// Must run during a tap (permission prompt). Returns true if the file was written to the folder.
-async function writeToFolder(blob, name){
-  if (!bkDir) return false;
-  try {
-    let perm = await bkDir.queryPermission?.({mode:'readwrite'});
-    if (perm !== 'granted') perm = await bkDir.requestPermission?.({mode:'readwrite'});
-    if (perm && perm !== 'granted') return false;
-    for (const n of [name, 'chowlog-backup-latest.json']) {
-      const w = await (await bkDir.getFileHandle(n, {create:true})).createWritable(); await w.write(blob); await w.close();
-    }
-    pruneFolder().catch(() => {});
-    return true;
-  } catch { return false; }
-}
-async function pruneFolder(){ // keep the 30 newest daily files
-  const names = []; for await (const [n, hd] of bkDir.entries()) if (hd.kind === 'file' && /^chowlog-backup-\d{4}-\d{2}-\d{2}\.json$/.test(n)) names.push(n);
-  names.sort().reverse(); for (const n of names.slice(30)) await bkDir.removeEntry(n);
-}
-// Saves a backup: to the chosen folder if there is one, otherwise to Downloads. Returns where it went.
-async function storeBackup(blob){
-  const name = `chowlog-backup-${todayStr()}.json`;
-  if (await writeToFolder(blob, name)) return `“${bkDir.name}”`;
-  saveBlob(blob, name); return 'Downloads';
-}
-async function shareBackup(){
-  const {blob} = await buildBackup(), f = new File([blob], `chowlog-backup-${todayStr()}.json`, {type:'application/json'});
-  if (navigator.canShare?.({files:[f]})) { try { await navigator.share({files:[f], title:'ChowLog backup'}); } catch {} }
-  else { saveBlob(blob, f.name); toast('Saved to Downloads. Upload it to Google Drive from there.'); }
-}
-async function markBackedUp(hash){ Object.assign(S, {lastBackup:Date.now(), backupSnooze:0, lastAutoDay:todayStr(), lastBackupHash:hash}); await saveSettings(); }
-async function exportData(){
-  const {blob, hash} = await buildBackup();
-  toast(`Backup saved to ${await storeBackup(blob)}`);
-  await markBackedUp(hash); if (curTab === 'settings') renderSettings(); else refresh();
-}
-/* Daily automatic backup: browsers only allow saving a file right after a tap, so the backup is
-   prepared in advance and saved on the first tap of the day. Skipped when nothing has changed. */
-const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-let autoBk = null;
-async function armAutoBackup(){
-  if (autoBk || !S.autoBackup || isIOS || S.lastAutoDay === todayStr()) return;
-  if (!(await tx('entries', 'readonly', st => st.count()))) return; // nothing to protect yet
-  const b = await buildBackup();
-  if (b.hash === S.lastBackupHash) { S.lastAutoDay = todayStr(); return saveSettings(); } // unchanged since the last backup
-  autoBk = b;
-  document.addEventListener('click', runAutoBackup, {capture:true, once:true});
-}
-async function runAutoBackup(ev){
-  // A tap that's choosing the backup folder backs up there itself; wait for the next tap instead
-  if (ev?.target?.closest?.('[data-act=fdpick], #bk_dir')) return document.addEventListener('click', runAutoBackup, {capture:true, once:true});
-  const b = autoBk; autoBk = null; if (!b || S.lastAutoDay === todayStr()) return;
-  const where = await storeBackup(b.blob);
-  await markBackedUp(b.hash); toast(`Daily backup saved to ${where}`); if (curTab === 'settings') renderSettings();
+  out.kv = out.kv.map(r => r.k === 'settings' ? {...r, v:{...r.v, apiKey:''}} : r); // never export the key
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out)], {type:'application/json'}));
+  a.download = `chowlog-backup-${todayStr()}.json`; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000); toast('Backup exported');
 }
 $('#importInput').onchange = async ev => {
   const file = ev.target.files[0]; ev.target.value = ''; if (!file) return;
@@ -1864,12 +1695,9 @@ $('#importInput').onchange = async ev => {
     const d = JSON.parse(await file.text()); if (d.app !== 'chowlog') throw new Error();
     if (!confirm('Replace everything on this phone with this backup?')) return;
     const key = S.apiKey;
-    for (const s of STORES) await idb.replace(s, (d[s] || []).filter(r => s !== 'kv' || r.k !== 'bkdir'));
-    if (bkDir) await idb.put('kv', {k:'bkdir', v:bkDir});
+    for (const s of STORES) await idb.replace(s, d[s] || []);
     await loadSettings(); await loadBody(); if (!S.apiKey && key){ S.apiKey = key; await saveSettings(); }
-    if (ob) { ob = null; closeSheet(); }
-    S.setupDone = true; await saveSettings();
-    toast(`Backup restored: ${(d.entries || []).length} food entries`); refresh();
+    toast('Backup imported'); refresh();
   } catch { toast("That file isn't a ChowLog backup"); }
 };
 
@@ -1971,16 +1799,11 @@ document.addEventListener('click', ev => {
     case 'manual': manualSheet(); break;
     case 'describe': describeSheet(); break;
     case 'flexon': setFlexToday(true); break;
-    case 'bknow': exportData(); break;
-    case 'fdpick': chooseBkFolder().then(ok => ok && exportData()); break;
-    case 'fdlater': S.folderSnooze = Date.now() + 3 * 864e5; saveSettings(); refresh(); break;
-    case 'bklater': S.backupSnooze = Date.now() + 2 * 864e5; saveSettings(); refresh(); break;
     case 'inbody': choosePhoto({type:'inbody'}); break;
     case 'ibopen': inbodyReview(d.id); break;
     case 'flexoff': setFlexToday(false); break;
     case 'obset': if (ob) { obRead(); if (d.f === 'units') { S.units = d.v; saveSettings(); if (ob.goal === 'lose') ob.pace = nearestPace(ob.pace); } ob[d.f] = isNaN(+d.v) ? d.v : +d.v; if (d.f === 'goal') { ob.pace = d.v === 'lose' ? PACE.lose[1][0] : d.v === 'gain' ? 250 : 0; ob.pf = PF_DEFAULT[d.v]; } renderSetup(); } break;
     case 'obnext': if (ob) obNext(); break;
-    case 'obrestore': $('#importInput').click(); break;
     case 'obback': if (ob) { obRead(); ob.step--; renderSetup(); } break;
     case 'obskip': if (ob) { S.setupDone = true; saveSettings(); ob = null; closeSheet(); showTab('settings'); toast('Enter your targets here anytime'); } break;
     case 'obdone': if (ob) { if (d.key && $('#ob_key').value.trim()) { S.apiKey = $('#ob_key').value.trim(); saveSettings(); } ob = null; closeSheet(); refresh(); } break;
@@ -2017,14 +1840,13 @@ document.addEventListener('keydown', ev => {
 
 (async () => {
   const firstRun = !(await idb.get('kv', 'settings'));
-  await loadSettings(); await loadBody(); await loadBkDir();
+  await loadSettings(); await loadBody();
   try { // one-time move of entries from the old single "Snacks" section into morning/afternoon/evening snacks
     for (const e of (await idb.all('entries')).filter(e => e.meal === 'snack')) { const m = mealForTime(entTime(e)); e.meal = SNACKS.has(m) ? m : {breakfast:'snack_am', lunch:'snack_pm', dinner:'snack_eve'}[m]; await idb.put('entries', e); }
   } catch {}
   try { await navigator.storage?.persist?.(); } catch {}
   showTab('today');
   if (firstRun) openSetup(true);
-  armAutoBackup().catch(() => {});
   processQueue();
   if ('serviceWorker' in navigator) {
     // When a new version installs, reload once so it shows immediately instead of on the next launch.

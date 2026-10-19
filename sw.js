@@ -1,7 +1,7 @@
 // ChowLog service worker. Every GitHub Pages app on your account shares one web address
 // (yourname.github.io), so everything here is namespaced with APP_ID and never touches other apps' data.
 const APP_ID = 'chowlog';
-const VERSION = 45; // bump this when you change any app file so phones pick up the update
+const VERSION = 46; // bump this when you change any app file so phones pick up the update
 const CACHE = `${APP_ID}-v${VERSION}`;
 const ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './zxing.min.js'];
 const precache = () => caches.open(CACHE).then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' }))));

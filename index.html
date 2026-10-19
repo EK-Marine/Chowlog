@@ -159,6 +159,9 @@ h3.hrow{display:flex;align-items:center;justify-content:space-between}
 .obdots{display:flex;gap:6px;margin-bottom:12px}.obdots i{flex:1;height:4px;border-radius:2px;background:var(--line)}.obdots i.on{background:var(--coyote)}
 .obres{text-align:center;margin:6px 0 10px}.obres span{display:block;font-size:46px;font-weight:800;letter-spacing:-1px;font-variant-numeric:tabular-nums}
 .obres small{color:var(--mute)}
+.ppgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:4px 0 6px}
+.ppimg{padding:0;border:2px solid transparent;border-radius:8px;overflow:hidden;background:#fff;aspect-ratio:1}
+.ppimg img{width:100%;height:100%;object-fit:cover;display:block}.ppimg.on{border-color:var(--coyote)}
 .pick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:4px 0 8px}
 .act.primary-act small{color:var(--headink);opacity:.7}
 
@@ -337,7 +340,17 @@ async function productThumb(p){ // stores a small copy so the photo shows offlin
   if (p.thumb || !p.image) return p.thumb || null;
   const t = await cacheThumb(p.image); if (t) { p.thumb = t; await idb.put('products', p); } return t;
 }
+// Stock photos: search Wikimedia Commons (Wikipedia's photo library) for a specific description of one serving.
+async function stockPhotos(term, n = 9){
+  if (!term) return [];
+  const q = encodeURIComponent(term + ' -drawing -illustration -diagram -logo filetype:bitmap');
+  const r = await fetch(`https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrnamespace=6&gsrlimit=${n + 6}&gsrsearch=${q}&prop=imageinfo&iiprop=url|mime&iiurlwidth=320`);
+  if (!r.ok) throw new HttpErr(r.status, 'Photo search error');
+  return Object.values((await r.json()).query?.pages || {}).sort((a, b) => a.index - b.index)
+    .map(p => p.imageinfo?.[0]).filter(i => i?.thumburl && /jpe?g|png|webp/.test(i.mime || '')).slice(0, n).map(i => i.thumburl);
+}
 async function wikiThumb(term){
+  try { const u = (await stockPhotos(term, 1))[0]; if (u) return (await cacheThumb(u)) || u; } catch {}
   try {
     if (!term) return null;
     const r = await fetch('https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&prop=pageimages&piprop=thumbnail&pithumbsize=240&generator=search&gsrlimit=1&gsrsearch=' + encodeURIComponent(term));
@@ -804,10 +817,37 @@ function manualSheet(pre = {}){
   };
 }
 
+// Pick a different photo for an entry: stock photos, your own photo, or none.
+async function photoPicker(e){
+  const name = e.name.replace(/\s*\([^)]*\)\s*$/, '').replace(/^(.*?)( ×\d.*)$/, '$1');
+  sheet(`<h2>Choose a photo</h2>
+    <div class="srow"><input id="pp_q" value="${esc(name)}" enterkeyhint="search" autocomplete="off"><button id="pp_go">Search</button></div>
+    <p class="hint">Tip: describe one serving, like “peeled hard boiled egg” or “single banana”.</p>
+    <div id="pp_res" class="ppgrid"></div>
+    <div class="btns"><button id="pp_own">Use my own photo</button>${e.thumb ? '<button class="danger" id="pp_none">Remove photo</button>' : ''}<button data-act="close">Cancel</button></div>`);
+  const save = async thumb => { e.thumb = thumb || undefined; await idb.put('entries', e); toast(thumb ? 'Photo updated' : 'Photo removed'); refresh(); entrySheet(e.id); };
+  const run = async () => {
+    const q = $('#pp_q').value.trim(); if (!q) return;
+    const box = $('#pp_res');
+    if (!navigator.onLine) { box.innerHTML = '<p class="hint">Photo search needs a connection. You can still use your own photo.</p>'; return; }
+    box.innerHTML = '<p class="hint">Searching…</p>';
+    try {
+      const urls = await stockPhotos(q, 9); if (!$('#pp_res')) return;
+      box.innerHTML = urls.length ? urls.map((u, i) => `<button class="ppimg" data-i="${i}"><img src="${u}" alt="" loading="lazy" onerror="this.parentNode.remove()"></button>`).join('')
+        : '<p class="hint">No photos found. Try different words.</p>';
+      box.querySelectorAll('.ppimg').forEach(b => b.onclick = async () => { b.classList.add('on'); await save((await cacheThumb(urls[+b.dataset.i])) || urls[+b.dataset.i]); });
+    } catch { if ($('#pp_res')) box.innerHTML = '<p class="hint">Photo search failed. Try again in a moment.</p>'; }
+  };
+  $('#pp_go').onclick = run; $('#pp_q').onkeydown = ev => { if (ev.key === 'Enter') run(); };
+  $('#pp_own').onclick = () => { closeSheet(); photoMode = {type:'thumbfor', id:e.id}; choosePhoto({type:'thumbfor', id:e.id}); };
+  if ($('#pp_none')) $('#pp_none').onclick = () => save(null);
+  run();
+}
 async function entrySheet(id){
   const e = await idb.get('entries', id); if (!e) return;
   let h = `<h2>${e.status === 'ok' ? 'Edit entry' : 'Queued entry'}</h2>`;
   if (e.thumb) h += `<img class="prev" src="${e.thumb}" alt="">`;
+  if (e.status === 'ok') h += `<div class="btns" style="margin:-4px 0 10px"><button id="e_photo">${e.thumb ? 'Change photo' : 'Add photo'}</button></div>`;
   if (e.status !== 'ok'){
     if (e.status === 'error') h += `<p class="errbox">${esc(e.error)}</p>`;
     const pt = e.pending?.type, keyNote = S.apiKey ? '.' : ' and an API key is set in Settings.';
@@ -853,6 +893,7 @@ async function entrySheet(id){
         <div class="btns"><button class="primary" id="e_recalc">Recalculate</button></div></details>`}
       <div class="btns"><button class="danger" id="e_del">Delete</button><button id="e_fav">Favorite</button>${e.date !== todayStr() ? '<button id="e_copy">Log today</button>' : ''}<button class="primary" id="e_save">Save</button></div>`;
     sheet(h);
+    $('#e_photo').onclick = () => photoPicker(e);
     const read = () => { const v = readMacros('e_'), k = amtOf('e_scale') || 1; return {...v, cal:v.cal*k, p:v.p*k, c:v.c*k, f:v.f*k}; };
     // Changing the time moves the item to the meal for that time; you can still pick a different meal after.
     const syncMeal = () => { const t = readTime('e_time'); if (t) $('#e_meal').value = mealForTime(t); };
@@ -923,7 +964,7 @@ function toJpeg(img, max, q){
 let photoMode = {type:'meal'};
 function scanLabelFor(code){ choosePhoto({type:'label', code}); }
 function choosePhoto(mode){
-  sheet(`<h2>${mode.type === 'label' ? 'Nutrition Label' : mode.type === 'inbody' ? 'InBody result' : 'Meal photo'}</h2>
+  sheet(`<h2>${mode.type === 'label' ? 'Nutrition Label' : mode.type === 'inbody' ? 'InBody result' : mode.type === 'thumbfor' ? 'Your photo' : 'Meal photo'}</h2>
     ${mode.type === 'inbody' ? '<p class="hint">Photograph the whole sheet flat, in good light, or choose a screenshot of the InBody app or results website.</p>' : ''}
     <div class="pick"><button class="act primary-act" id="pk_cam"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M4.5 7h3l1.7-2.5h5.6L16.5 7h3a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/><circle cx="12" cy="13.5" r="3.8"/></g><circle cx="18.2" cy="10" r="1" fill="currentColor"/></svg></span>Take a photo</button>
     <button class="act" id="pk_gal"><span><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><rect x="2.5" y="4" width="19" height="16" rx="2"/><path d="M3.5 18l5.5-5.5 4 4 2.5-2.5 5 5"/></g><circle cx="15.5" cy="9" r="1.7" fill="currentColor"/></svg></span>Choose from gallery</button></div>
@@ -966,6 +1007,7 @@ $('#photoInput').onchange = async ev => {
   catch { return toast('That photo could not be read. Try again.'); }
   if (mode.type === 'label') return labelSheet(full, thumb, mode.code);
   if (mode.type === 'inbody') return inbodyStart(full, thumb);
+  if (mode.type === 'thumbfor') { const e = await idb.get('entries', mode.id); if (e) { e.thumb = thumb; await idb.put('entries', e); toast('Photo updated'); refresh(); entrySheet(e.id); } return; }
   const now = navigator.onLine && S.apiKey;
   // For a gallery photo, offer the time it was taken (unless a date/time was already chosen).
   let taken = null;
@@ -1041,7 +1083,7 @@ function describeSheet(){
 const TEXT_SYS = `You estimate nutrition for foods described in text, for a calorie tracker. Split the description into its distinct items.
 If an item is a restaurant chain menu item or a packaged brand product, use that company's published nutrition information for the standard item, including default dressings, sauces and toppings unless the user says otherwise. If a web search tool is available, use it to look up the official numbers for chain or brand items. Otherwise estimate typical portions.
 Your final answer must be ONLY a JSON object, no markdown, in this shape:
-{"meal_name":"short name","photo_term":"2-3 word generic name of the main dish for a stock photo, e.g. chicken salad","items":[{"name":"food","portion":"e.g. full size","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0}],"confidence":"low|medium|high","source":"published|estimate","notes":"one short sentence on assumptions"}`;
+{"meal_name":"short name","photo_term":"photo search phrase showing ONE typical serving as eaten, e.g. 'peeled hard boiled egg', 'single banana', 'chicken caesar salad bowl'","items":[{"name":"food","portion":"e.g. full size","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0}],"confidence":"low|medium|high","source":"published|estimate","notes":"one short sentence on assumptions"}`;
 async function resolveText(e){
   const content = 'Estimate the nutrition for: ' + e.pending.desc;
   const WEB_LOOKUP = false; // set true to let Claude search the web for official chain/brand nutrition (about 1¢ per lookup)

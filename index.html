@@ -247,7 +247,7 @@ label.chk input{width:auto;margin:0}
 
 <script>
 'use strict';
-const APP_VERSION = 48; // keep in step with VERSION in sw.js
+const APP_VERSION = 49; // keep in step with VERSION in sw.js
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -511,7 +511,11 @@ function goalColor(cal, target){
 /* ---------- Flex day (cheat or refeed) ---------- */
 const FLEX_COLOR = 'hsl(272,45%,58%)';
 const DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-const FREQ = {'1':'Every week', '2':'Every 2 weeks', '3':'Every 3 weeks', 'm':'Once a month (first of the month)'};
+const FREQ = {'1':'Every week', '2':'Every 2 weeks', '3':'Every 3 weeks', 'm':'Once a month (first of the month)', 'adhoc':'As needed (you pick the days)'};
+// Limits for "as needed" flex days: [label, how many, window, average per week]
+const FLEX_LIMITS = {w1:['Up to 1 per week', 1, 'week', 1], w2:['Up to 2 per week', 2, 'week', 2], d14:['Up to 1 every 2 weeks', 1, '14', 0.5],
+  m2:['Up to 2 per month', 2, 'month', 0.46], none:['No limit', Infinity, 'week', 1]};
+const isAdhoc = () => flexCfg().freq === 'adhoc';
 const flexCfg = () => S.flex || {type:'off'};
 const flexName = () => flexCfg().type === 'refeed' ? 'refeed day' : 'cheat day';
 function dowOf(s){ const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d).getDay(); }
@@ -523,7 +527,7 @@ function flexPeriod(s){ // [start, end] of the cycle a date belongs to
   const st = addDays(a, k * 7 * n); return [st, addDays(st, 7 * n - 1)];
 }
 function flexScheduled(s){
-  const f = flexCfg(); if (f.type === 'off' || dowOf(s) !== +f.dow) return false;
+  const f = flexCfg(); if (f.type === 'off' || f.freq === 'adhoc' || dowOf(s) !== +f.dow) return false;
   if (f.freq === 'm') return +s.slice(8) <= 7;
   const n = +f.freq || 1; if (n === 1) return true;
   return ((Math.round((dnum(s) - dnum(f.anchor || s)) / 7) % n) + n) % n === 0;
@@ -542,8 +546,20 @@ function targetFor(s){
 }
 function dayColor(s, cal){ const T = targetFor(s); return T.kind === 'cheat' ? (cal ? FLEX_COLOR : '') : goalColor(cal, T.cal); }
 // Can today become this cycle's flex day? Only if the cycle's flex day hasn't already happened.
+// "As needed": which flex days count against the limit for a given date
+function adhocUsed(s){
+  const L = FLEX_LIMITS[flexCfg().allow || 'w1'], out = [];
+  let a, b;
+  if (L[2] === 'month') { a = s.slice(0, 8) + '01'; const [y, m] = s.split('-').map(Number); b = ymd(new Date(y, m, 0)); }
+  else if (L[2] === '14') { a = addDays(s, -13); b = addDays(s, 13); }
+  else { a = weekStart(s); b = addDays(a, 6); }
+  for (const [d, v] of Object.entries(flexCfg().overrides || {})) if (v === 'on' && d !== s && d >= a && d <= b) out.push(d);
+  return {used:out.sort(), max:L[1], label:L[2] === 'month' ? 'this month' : L[2] === '14' ? 'within 2 weeks' : 'this week'};
+}
+function adhocAllowed(s){ const u = adhocUsed(s); return u.used.length < u.max; }
 function canMoveFlexTo(s){
   if (flexCfg().type === 'off' || flexOn(s)) return false;
+  if (isAdhoc()) return adhocAllowed(s);
   const [st] = flexPeriod(s); for (let d = st; d < s; d = addDays(d, 1)) if (flexOn(d)) return false;
   return true;
 }
@@ -553,8 +569,8 @@ function refeedAdvice(cal, freq){
   const extra = cal - S.cal;
   if (extra <= 0) return `<span class="warn">This is at or below your normal target of ${S.cal.toLocaleString()}, so the refeed won't add anything. Try your maintenance calories instead.</span>`;
   const prof = S.profile?.lb ? S.profile : null, m = prof ? calcTargets(prof).tdee : null;
-  const perWeek = extra / ({'1':1, '2':2, '3':3, 'm':4.35})[freq || '1'];
-  let out = `Adds ${extra.toLocaleString()} calories on refeed days, about ${r0(perWeek).toLocaleString()} a week on average.`;
+  const perWeek = freq === 'adhoc' ? extra * Math.min(FLEX_LIMITS[($('#fx_allow')?.value) || flexCfg().allow || 'w1'][3], 2) : extra / ({'1':1, '2':2, '3':3, 'm':4.35})[freq || '1'];
+  let out = `Adds ${extra.toLocaleString()} calories on refeed days, about ${r0(perWeek).toLocaleString()} a week on average${freq === 'adhoc' ? ' if you use your full allowance' : ''}.`;
   if (!m) return out + ' Run “Estimate my targets” to compare this with your maintenance.';
   const over = cal - m;
   if (over > m * 0.1) out = `<span class="warn">That's ${over.toLocaleString()} calories above your estimated maintenance (${m.toLocaleString()}). More than about 10% over maintenance works more like a cheat day than a refeed. A typical refeed is ${m.toLocaleString()}–${(Math.round(m * 1.1 / 10) * 10).toLocaleString()}.</span> ` + out;
@@ -567,7 +583,16 @@ function refeedAdvice(cal, freq){
   }
   return out;
 }
+async function setFlexDay(d, on){ // "as needed" mode: mark or unmark any date
+  const f = {...flexCfg(), overrides:{...(flexCfg().overrides || {})}};
+  if (on) { if (!adhocAllowed(d)) { const u = adhocUsed(d); return toast(`You've already used ${u.used.length} ${flexName()}${u.used.length > 1 ? 's' : ''} ${u.label} (${u.used.map(shortD).join(', ')}).`); } f.overrides[d] = 'on'; }
+  else delete f.overrides[d];
+  S.flex = f; await saveSettings(); refresh();
+  const nm = flexName()[0].toUpperCase() + flexName().slice(1), when = d === todayStr() ? 'Today' : shortD(d);
+  toast(on ? `${when} is a ${flexName()}` : `${nm} removed from ${when === 'Today' ? 'today' : when}`);
+}
 async function setFlexToday(on){
+  if (isAdhoc()) return setFlexDay(curDate, on);
   const f = {...flexCfg(), overrides:{...(flexCfg().overrides || {})}}, t = todayStr(), [st, en] = flexPeriod(t);
   if (on) { for (let d = st; d <= en; d = addDays(d, 1)) if (d !== t && flexOn(d)) f.overrides[d] = 'off'; f.overrides[t] = 'on'; }
   else f.overrides[t] = 'off';
@@ -626,9 +651,11 @@ async function renderToday(){
   const t = totals(es.filter(e => e.status === 'ok')), T = targetFor(curDate), isToday = curDate === todayStr();
   const left = T.cal - t.cal, filled = Math.round(Math.min(t.cal, T.cal) / T.cal * 20);
   const segs = Array.from({length:20}, (_,i) => `<i class="${T.kind === 'cheat' ? 'fx' : left < 0 ? 'ov' : i < filled ? 'on' : ''}"></i>`).join('');
-  const flexLink = !isToday || flexCfg().type === 'off' ? '' : T.kind
-    ? `<button class="link fxl" data-act="flexoff">Not today</button>`
-    : canMoveFlexTo(curDate) ? `<button class="link fxl" data-act="flexon">Make today your ${flexName()}</button>` : '';
+  const dayWord = isToday ? 'today' : 'this day', adhoc = isAdhoc();
+  const flexLink = (!isToday && !adhoc) || flexCfg().type === 'off' ? '' : T.kind
+    ? `<button class="link fxl" data-act="flexoff">${adhoc ? `Undo ${flexName()}` : 'Not today'}</button>`
+    : canMoveFlexTo(curDate) ? `<button class="link fxl" data-act="flexon">Make ${dayWord} a ${flexName()}</button>${adhoc && FLEX_LIMITS[flexCfg().allow || 'w1'][1] !== Infinity ? `<span class="fxl" style="text-decoration:none;margin-left:6px">${(() => { const u = adhocUsed(curDate); return `${u.max - u.used.length} left ${u.label}`; })()}</span>` : ''}`
+    : adhoc ? `<span class="fxl" style="text-decoration:none">${(() => { const u = adhocUsed(curDate); return `${flexName()[0].toUpperCase() + flexName().slice(1)} used ${u.label} (${u.used.map(shortD).join(', ')})`; })()}</span>` : '';
   let h = await calendarHTML() + `<div class="card gauge">
     ${T.kind ? `<div class="fxbadge">${T.kind === 'cheat' ? '★ Cheat day' : '★ Refeed day'}</div>` : ''}
     ${T.kind === 'cheat'
@@ -1707,8 +1734,14 @@ function renderSettings(){
       <option value="refeed" ${flexCfg().type === 'refeed' ? 'selected' : ''}>Refeed day (raised target, extra carbs)</option>
       <option value="cheat" ${flexCfg().type === 'cheat' ? 'selected' : ''}>Cheat day (no target)</option></select></label>
     <div id="fx_more" ${flexCfg().type === 'off' ? 'hidden' : ''}>
-      <div class="grid4"><label>Day<select id="fx_dow">${DOW.map((n, i) => `<option value="${i}" ${+(flexCfg().dow ?? 6) === i ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+      <div class="grid4"><label id="fx_dowl">Day<select id="fx_dow">${DOW.map((n, i) => `<option value="${i}" ${+(flexCfg().dow ?? 6) === i ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
       <label>How often<select id="fx_freq">${Object.entries(FREQ).map(([k, n]) => `<option value="${k}" ${(flexCfg().freq || '1') === k ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div>
+      <div id="fx_adhoc" ${isAdhoc() ? '' : 'hidden'}>
+        <label>Limit<select id="fx_allow">${Object.entries(FLEX_LIMITS).map(([k, l]) => `<option value="${k}" ${(flexCfg().allow || 'w1') === k ? 'selected' : ''}>${l[0]}</option>`).join('')}</select></label>
+        <p class="hint">Use one whenever your body needs it with “Make today a…” on the Today screen, or plan one ahead here.</p>
+        <div class="grid4"><label>Plan a day<input type="date" id="fx_plan" min="${todayStr()}"></label><div class="btns" style="margin-top:20px"><button id="fx_add">Add</button></div></div>
+        <div id="fx_list"></div>
+      </div>
       <div id="fx_refeed" ${flexCfg().type === 'refeed' ? '' : 'hidden'}>${numF('fx_cal', 'Refeed day calories', flexCfg().cal || (S.profile?.lb ? calcTargets({...S.profile, pf:S.profile.pf}).tdee : Math.round(S.cal * 1.2 / 10) * 10))}
         <p class="hint">Defaults to your estimated maintenance calories. Protein and fat stay the same; the extra goes to carbs.</p></div>
       <p class="hint" id="fx_next"></p>
@@ -1765,21 +1798,34 @@ function renderSettings(){
   ['t_p','t_c','t_f'].forEach(id => $('#'+id).oninput = chk); chk();
   $('#t_est').onclick = () => openSetup(false);
   const fxUpd = () => {
-    const ty = $('#fx_type').value; $('#fx_more').hidden = ty === 'off'; $('#fx_refeed').hidden = ty !== 'refeed';
+    const ty = $('#fx_type').value, ad = $('#fx_freq').value === 'adhoc'; $('#fx_more').hidden = ty === 'off'; $('#fx_refeed').hidden = ty !== 'refeed';
+    $('#fx_adhoc').hidden = !ad; $('#fx_dowl').hidden = ad; $('#fx_dowl').parentNode.style.gridTemplateColumns = ad ? '1fr' : '';
     $('#fx_note').innerHTML = ty === 'cheat' && S.profile?.goal === 'lose'
       ? 'Heads up: one big cheat day can cancel several days of your deficit. A refeed day gives a similar break with less impact on fat loss.'
       : ty === 'refeed' ? refeedAdvice(num($('#fx_cal').value), $('#fx_freq').value) : '';
   };
-  $('#fx_freq').onchange = fxUpd;
+  $('#fx_freq').onchange = fxUpd; $('#fx_allow').onchange = fxUpd;
+  const fxList = () => {
+    if (!isAdhoc() || flexCfg().type === 'off') return;
+    const up = Object.entries(flexCfg().overrides || {}).filter(([d, v]) => v === 'on' && d >= todayStr()).map(([d]) => d).sort();
+    $('#fx_list').innerHTML = up.length ? `<h3 style="margin:10px 2px 4px">Planned</h3>` + up.map(d => `<div class="bkf"><span>${d === todayStr() ? 'Today' : dayName(d)}</span><button class="link" data-act="fxrm" data-d="${d}" style="padding:0">Remove</button></div>`).join('') : '';
+  };
+  fxList();
+  $('#fx_add').onclick = async () => {
+    const d = $('#fx_plan').value; if (!d || d < todayStr()) return toast('Pick today or a future date');
+    if (!isAdhoc() || flexCfg().type !== $('#fx_type').value) return toast('Save your flex day settings first');
+    await setFlexDay(d, true); renderSettings();
+  };
   $('#fx_type').onchange = async () => { fxUpd(); if ($('#fx_type').value === 'off' && flexCfg().type !== 'off') { S.flex = {...flexCfg(), type:'off'}; await saveSettings(); toast('Flex day turned off'); } }; $('#fx_cal').oninput = fxUpd; fxUpd();
   const showNext = () => { if (flexCfg().type === 'off') return; let d = todayStr(); for (let i = 0; i < 70 && !flexOn(d); i++) d = addDays(d, 1);
-    $('#fx_next').textContent = flexOn(d) ? `Next ${flexName()}: ${d === todayStr() ? 'today' : dayName(d)}.` : ''; };
+    $('#fx_next').textContent = flexOn(d) ? `Next ${flexName()}: ${d === todayStr() ? 'today' : dayName(d)}.` : isAdhoc() ? 'No days planned. Use one from the Today screen whenever you need it.' : ''; };
   showNext();
   $('#fx_save').onclick = async () => {
     const type = $('#fx_type').value, dow = +$('#fx_dow').value, freq = $('#fx_freq').value, old = flexCfg();
     const keepAnchor = old.anchor && +old.dow === dow && old.freq === freq;
+    const keepOv = keepAnchor || (freq === 'adhoc' && old.freq === 'adhoc');
     S.flex = {type, dow, freq, anchor:keepAnchor ? old.anchor : nextDow(todayStr(), dow), cal:r0($('#fx_cal').value) || undefined,
-      overrides:keepAnchor ? (old.overrides || {}) : {}};
+      allow:$('#fx_allow').value, overrides:keepOv ? (old.overrides || {}) : {}};
     await saveSettings(); toast('Flex day saved'); renderSettings();
   };
   $('#t_save').onclick = async () => { for (const k of ['cal','p','c','f']) S[k] = r0($('#t_'+k).value) || S[k]; await saveSettings(); toast('Targets saved'); };
@@ -2012,6 +2058,7 @@ document.addEventListener('click', ev => {
     case 'inbody': choosePhoto({type:'inbody'}); break;
     case 'ibopen': inbodyReview(d.id); break;
     case 'flexoff': setFlexToday(false); break;
+    case 'fxrm': setFlexDay(d.d, false).then(() => renderSettings()); break;
     case 'obset': if (ob) { obRead(); if (d.f === 'units') { S.units = d.v; saveSettings(); if (ob.goal === 'lose') ob.pace = nearestPace(ob.pace); } ob[d.f] = isNaN(+d.v) ? d.v : +d.v; if (d.f === 'goal') { ob.pace = d.v === 'lose' ? PACE.lose[1][0] : d.v === 'gain' ? 250 : 0; ob.pf = PF_DEFAULT[d.v]; } renderSetup(); } break;
     case 'obnext': if (ob) obNext(); break;
     case 'obrestore': $('#importInput').click(); break;

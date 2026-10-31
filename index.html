@@ -251,7 +251,7 @@ label.chk input{width:auto;margin:0}
 
 <script>
 'use strict';
-const APP_VERSION = 54; // keep in step with VERSION in sw.js
+const APP_VERSION = 55; // keep in step with VERSION in sw.js
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -691,7 +691,7 @@ async function renderToday(){
     ${T.kind === 'cheat'
       ? `<div><span class="num">${r0(t.cal).toLocaleString()}</span><span class="lbl">calories eaten</span></div>
          <div class="sub">No calorie target today. Logging still counts toward your weekly average.</div>`
-      : `<div><span class="num"${overBand ? ` style="color:${gc}"` : ''}>${Math.abs(r0(left)).toLocaleString()}</span><span class="lbl">${left < 0 ? 'calories over' : 'calories left'}</span></div>
+      : `<div><span class="num"${t.cal && gc ? ` style="color:${gc}"` : ''}>${Math.abs(r0(left)).toLocaleString()}</span><span class="lbl">${left < 0 ? 'calories over' : 'calories left'}</span></div>
          <div class="sub"><b${t.cal && gc ? ` style="color:${gc}"` : ''}>${r0(t.cal).toLocaleString()}</b> eaten of ${T.cal.toLocaleString()}${T.kind === 'refeed' ? ` (raised from ${S.cal.toLocaleString()}, extra in carbs)` : ''}</div>`}
     <div class="segs">${segs}</div>
     <div class="macros">${macro('Protein',t.p,T.p,'p')}${macro('Carbs',t.c,T.c,'c')}${macro('Fat',t.f,T.f,'f')}</div>

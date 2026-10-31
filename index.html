@@ -251,7 +251,7 @@ label.chk input{width:auto;margin:0}
 
 <script>
 'use strict';
-const APP_VERSION = 52; // keep in step with VERSION in sw.js
+const APP_VERSION = 54; // keep in step with VERSION in sw.js
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -668,7 +668,10 @@ async function renderToday(){
   const es = (await idb.byDate(curDate)).sort((a, b) => byTime(b, a)); // newest first
   const t = totals(es.filter(e => e.status === 'ok')), T = targetFor(curDate), isToday = curDate === todayStr();
   const left = T.cal - t.cal, filled = Math.round(Math.min(t.cal, T.cal) / T.cal * 20);
-  const segs = Array.from({length:20}, (_,i) => `<i class="${T.kind === 'cheat' ? 'fx' : left < 0 ? 'ov' : i < filled ? 'on' : ''}"></i>`).join('');
+  // Same goal-aware colors and buffers as the calendar and Trends (e.g. losing fat: green at 85–105% of target)
+  const gc = T.kind === 'cheat' ? '' : goalColor(t.cal, T.cal), overBand = T.kind !== 'cheat' && t.cal > T.cal * goalBand()[1] + 1e-9;
+  const segs = Array.from({length:20}, (_,i) => T.kind === 'cheat' ? '<i class="fx"></i>'
+    : (overBand || i < filled) && gc ? `<i style="background:${gc}"></i>` : '<i></i>').join('');
   // Flex day control: always available on the Today card, at any time of day
   const dayWord = isToday ? 'today' : 'this day', adhoc = isAdhoc(), fxOff = flexCfg().type === 'off';
   const cap = s => s[0].toUpperCase() + s.slice(1);
@@ -688,8 +691,8 @@ async function renderToday(){
     ${T.kind === 'cheat'
       ? `<div><span class="num">${r0(t.cal).toLocaleString()}</span><span class="lbl">calories eaten</span></div>
          <div class="sub">No calorie target today. Logging still counts toward your weekly average.</div>`
-      : `<div><span class="num ${left<0?'over':''}">${Math.abs(r0(left)).toLocaleString()}</span><span class="lbl">${left < 0 ? 'calories over' : 'calories left'}</span></div>
-         <div class="sub">${r0(t.cal).toLocaleString()} eaten of ${T.cal.toLocaleString()}${T.kind === 'refeed' ? ` (raised from ${S.cal.toLocaleString()}, extra in carbs)` : ''}</div>`}
+      : `<div><span class="num"${overBand ? ` style="color:${gc}"` : ''}>${Math.abs(r0(left)).toLocaleString()}</span><span class="lbl">${left < 0 ? 'calories over' : 'calories left'}</span></div>
+         <div class="sub"><b${t.cal && gc ? ` style="color:${gc}"` : ''}>${r0(t.cal).toLocaleString()}</b> eaten of ${T.cal.toLocaleString()}${T.kind === 'refeed' ? ` (raised from ${S.cal.toLocaleString()}, extra in carbs)` : ''}</div>`}
     <div class="segs">${segs}</div>
     <div class="macros">${macro('Protein',t.p,T.p,'p')}${macro('Carbs',t.c,T.c,'c')}${macro('Fat',t.f,T.f,'f')}</div>
     ${flexLink}

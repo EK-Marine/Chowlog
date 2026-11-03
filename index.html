@@ -253,7 +253,7 @@ button.irow:last-of-type{border-bottom:0}.irow .ied{color:var(--mute);margin-lef
 
 <script>
 'use strict';
-const APP_VERSION = 58; // keep in step with VERSION in sw.js
+const APP_VERSION = 59; // keep in step with VERSION in sw.js
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1241,8 +1241,29 @@ function labelSheet(full, thumb, code){
 }
 /* ---------- InBody body-composition scans ---------- */
 let BODY = []; // scans and history points; weights stored in lb, like the weight log
-async function loadBody(){ const r = await idb.get('kv', 'body'); BODY = (r && r.v) || []; }
+async function loadBody(){ const r = await idb.get('kv', 'body'); BODY = (r && r.v) || []; if (mergeBodyDays()) await saveBody(); }
 const saveBody = () => idb.put('kv', {k:'body', v:BODY});
+// One InBody test per day: a full sheet and a history row (or two sheets) with the same date are the same scan.
+// The full sheet wins; any value it lacks is filled in from the others. Returns how many duplicates were folded in.
+const BODY_KEYS = ['weightLb','smmLb','bfmLb','pbf','lbmLb','tbwLb','bmr','score','vfa','vfaUnit','bmi','ecw','time','device','sex','age','thumb'];
+function mergeBodyDays(keepId){
+  const rank = b => (b.id === keepId ? 8 : 0) + (b.source !== 'history' ? 4 : 0) + (b.bmr || b.lbmLb ? 2 : 0) + (b.reviewed ? 1 : 0);
+  const groups = {}; let removed = 0;
+  for (const b of BODY) if (b.status === 'ok' && (b.reviewed || b.id === keepId)) (groups[b.date] ||= []).push(b);
+  const drop = new Set();
+  for (const g of Object.values(groups)) {
+    if (g.length < 2) continue;
+    g.sort((a, b) => rank(b) - rank(a) || (b.created || 0) - (a.created || 0));
+    const base = g[0];
+    for (const o of g.slice(1)) {
+      for (const k of BODY_KEYS) if (base[k] == null && o[k] != null) base[k] = o[k];
+      if (o.minor) base.minor = true;
+      drop.add(o.id); removed++;
+    }
+  }
+  if (removed) BODY = BODY.filter(b => !drop.has(b.id));
+  return removed;
+}
 const bodyOk = () => BODY.filter(b => b.status === 'ok').sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
 // Latest adult scan with lean mass from the last 120 days: used for resting burn (Katch-McArdle, the same formula InBody uses).
 function leanScan(){
@@ -1311,16 +1332,19 @@ function inbodyReview(id){
       Object.assign(b, {date, dateGuessed:false, weightLb:wl, pbf:num(g('ib_pbf')) || null, smmLb:lb('ib_smm'), bfmLb:lb('ib_bfm'), lbmLb:lb('ib_lbm'), bmr:num(g('ib_bmr')) || null, reviewed:true});
       await idb.put('weights', {date, lb:wl});
       let added = 0;
+      const had = new Set(BODY.filter(o => o.status === 'ok' && o.reviewed && o.id !== b.id).map(o => o.date)), matched = had.has(date);
       if (b.hist?.length && $('#ib_hist')?.checked) {
         for (const x of b.hist) {
-          if (x.date === date || BODY.some(o => o.status === 'ok' && o.date === x.date)) continue;
+          if (x.date === date) continue;
+          // A date already on file is the same test: the merge below only fills in values it was missing
           BODY.push({id:uid(), status:'ok', reviewed:true, source:'history', date:x.date, weightLb:x.weightLb, smmLb:x.smmLb, pbf:x.pbf,
-            bfmLb:x.pbf && x.weightLb ? Math.round(x.weightLb * x.pbf) / 100 : null, minor:b.minor, device:b.device});
+            bfmLb:x.pbf && x.weightLb ? Math.round(x.weightLb * x.pbf) / 100 : null, minor:b.minor, device:b.device, created:0});
           if (!(await idb.get('weights', x.date))) await idb.put('weights', {date:x.date, lb:x.weightLb});
-          added++;
+          if (!had.has(x.date)) { added++; had.add(x.date); }
         }
       }
-      delete b.hist; await saveBody(); closeSheet(); toast(added ? `InBody scan saved, plus ${added} earlier tests` : 'InBody scan saved'); refresh();
+      delete b.hist; mergeBodyDays(b.id); await saveBody(); closeSheet();
+      toast((matched ? `Combined with the scan already saved for ${shortD(date)}` : 'InBody scan saved') + (added ? `, plus ${added} earlier test${added === 1 ? '' : 's'}` : '')); refresh();
     };
   }
   $('#ib_del').onclick = async () => {

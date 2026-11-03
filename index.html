@@ -202,6 +202,8 @@ label.chk input{width:auto;margin:0}
 .items{border:1px solid var(--line);border-radius:var(--r-sm);padding:6px 10px;margin-bottom:12px}
 .irow{display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:14px;border-bottom:1px solid var(--line)}
 .irow:last-of-type{border-bottom:0}
+button.irow{width:100%;background:none;border:0;border-bottom:1px solid var(--line);color:inherit;font:inherit;font-size:14px;text-align:left;padding:8px 0;align-items:center}
+button.irow:last-of-type{border-bottom:0}.irow .ied{color:var(--mute);margin-left:6px}
 .tot{font-weight:650;margin:4px 0}
 .cam{position:relative;border-radius:var(--r-sm);overflow:hidden;background:#000;margin-bottom:12px;aspect-ratio:4/3}
 .cam video{width:100%;height:100%;object-fit:cover;display:block}
@@ -251,7 +253,7 @@ label.chk input{width:auto;margin:0}
 
 <script>
 'use strict';
-const APP_VERSION = 57; // keep in step with VERSION in sw.js
+const APP_VERSION = 58; // keep in step with VERSION in sw.js
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -811,6 +813,33 @@ async function saveBuilder(log){
   await idb.put('favorites', f); builder = null;
   if (log) { refresh(); await useFav(f.id); } else { toast(rec ? 'Recipe saved' : 'Meal saved'); refresh(); }
 }
+// Edit one item inside a logged meal; the meal's totals are rebuilt from its items.
+async function entryItemSheet(id, k){
+  const e = await idb.get('entries', id), i = e?.items?.[k]; if (!i) return;
+  sheet(`<h2>Edit item</h2><p class="hint">Part of ${esc(e.name)}${i.portion ? ` · ${esc(i.portion)}` : ''}</p>
+    <label>Name<input id="ei_name" value="${esc(i.name)}"></label>
+    <div class="grid4">${numF('ei_cal','Calories',r1(i.cal))}${numF('ei_p','Protein (g)',r1(i.p))}${numF('ei_c','Carbs (g)',r1(i.c))}${numF('ei_f','Fat (g)',r1(i.f))}${numF('ei_fb','Fiber (g)',r1(i.fb))}</div>
+    ${amtInput('ei_k', 'Multiply by')}${fracChips('ei_k')}
+    <p class="hint">Use “Multiply by” for portions: 0.5 if you ate half of this item, 2 for a double.</p>
+    <div class="btns"><button class="danger" id="ei_del">Remove item</button><button id="ei_back">Back</button><button class="primary" id="ei_save">Save</button></div>`);
+  const done = async () => {
+    const t = totals(e.items);
+    Object.assign(e, {cal:r1(t.cal), p:r1(t.p), c:r1(t.c), f:r1(t.f), fb:r1(t.fb)});
+    await idb.put('entries', e); refresh(); entrySheet(e.id);
+  };
+  $('#ei_back').onclick = () => entrySheet(e.id);
+  $('#ei_save').onclick = async () => {
+    const v = readMacros('ei_'), m = amtOf('ei_k') || 1;
+    e.items[k] = {...i, name:v.name || i.name, cal:r1(v.cal*m), p:r1(v.p*m), c:r1(v.c*m), f:r1(v.f*m), fb:r1(v.fb*m)};
+    if (m !== 1 && i.portion) e.items[k].portion = `${fmtAmt(m)} × ${i.portion}`;
+    await done(); toast('Item updated');
+  };
+  $('#ei_del').onclick = async () => {
+    if (e.items.length === 1) return toast('This is the only item. Delete the whole entry instead.');
+    if (!confirm(`Remove ${i.name} from this meal?`)) return;
+    e.items.splice(k, 1); await done(); toast('Item removed');
+  };
+}
 function bItemSheet(k){
   const i = builder.items[k]; if (!i) return;
   sheet(`<h2>Edit item</h2><label>Name<input id="bi_name" value="${esc(i.name)}"></label>
@@ -969,7 +998,8 @@ async function entrySheet(id){
       await idb.put('entries', e); await idb.del('photos', e.id); entrySheet(e.id);
     };
   } else {
-    if (e.items?.length) h += `<div class="items">${e.items.map(i => `<div class="irow"><span>${esc(i.name)}${i.portion ? ` <small>(${esc(i.portion)})</small>` : ''}</span><span>${r0(i.cal)}</span></div>`).join('')}
+    if (e.items?.length) h += `<div class="items">${e.items.map((i, k) => `<button class="irow" data-act="eitem" data-id="${e.id}" data-i="${k}"><span>${esc(i.name)}${i.portion ? ` <small>(${esc(i.portion)})</small>` : ''}</span><span>${r0(i.cal)}<span class="ied">✎</span></span></button>`).join('')}
+      ${e.items.length > 1 ? '<p class="hint">Tap an item to change or remove it. The totals update to match.</p>' : ''}
       ${e.ai?.source === 'published' ? `<p class="hint">Based on published nutrition information${e.ai.notes ? '. ' + esc(e.ai.notes) : '.'}</p>` : ''}
       ${e.source === 'label' ? `<p class="hint">Read from the nutrition label. One serving is ${esc(e.serving || 'as printed')}.</p>`
         : e.ai && e.ai.source !== 'published' ? `<p class="hint">AI estimate, ${esc(e.ai.confidence || 'unknown')} confidence.${e.ai.notes ? ' ' + esc(e.ai.notes) : ''}</p>` : ''}</div>`;
@@ -2046,6 +2076,7 @@ function longPress(row){
     case 'usefav': favSheet(d.id); break;
     case 'userecent': { const e = recentCache[+d.i]; if (e) manualSheet({title:'Edit, then log', name:e.name, cal:r1(e.cal), p:r1(e.p), c:r1(e.c), f:r1(e.f), fb:r1(e.fb), thumb:e.thumb}); break; }
     case 'bitem': bItemSheet(+d.i); break;
+    case 'eitem': entryItemSheet(d.id, +d.i); break;
     case 'pickprod': row.click(); break;
   }
 }
@@ -2142,6 +2173,7 @@ document.addEventListener('click', ev => {
     case 'newrecipe': builder = {name:'', items:[], recipe:true, servings:4}; renderAdd(); window.scrollTo(0,0); break;
     case 'editmeal': idb.get('favorites', d.id).then(f => { if (!f) return; builder = {id:f.id, name:f.name, items:f.items.map(i => ({...i})), recipe:!!f.recipe, servings:f.servings}; renderAdd(); window.scrollTo(0,0); }); break;
     case 'bitem': bItemSheet(+d.i); break;
+    case 'eitem': entryItemSheet(d.id, +d.i); break;
     case 'usefav': useFav(d.id); break;
     case 'delfav': delFav(d.id); break;
     case 'userecent': useRecent(+d.i); break;

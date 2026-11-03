@@ -66,13 +66,13 @@ h3{font-size:15px;color:var(--mute);font-weight:600;margin:22px 4px 8px}
 .fxrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px}
 .fxbtn{background:transparent;color:var(--headink);border:1px solid rgba(238,240,234,.55);border-radius:18px;padding:7px 14px;font-size:14px;font-weight:600}
 .fxnote{color:var(--headink);opacity:.75;font-size:13px}
-.macros{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.macros{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .mac small{display:block;font-size:12px;opacity:.75}
-.mac b{font-size:17px;font-variant-numeric:tabular-nums}
-.mac b span{font-weight:400;opacity:.65;font-size:13px}
+.mac b{font-size:16px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mac b span{font-weight:400;opacity:.65;font-size:12px}
 .mbar{height:5px;border-radius:3px;background:var(--field-2);margin-top:5px;overflow:hidden}
 .mbar i{display:block;height:100%}
-.k-p{background:#7fa9d6}.k-c{background:var(--coyote)}.k-f{background:#c39ac7}
+.k-p{background:#7fa9d6}.k-c{background:var(--coyote)}.k-f{background:#c39ac7}.k-fb{background:#6fbf73}
 .mbar.over i{background:var(--signal)}
 
 .cal{padding:10px 8px 6px}
@@ -251,7 +251,7 @@ label.chk input{width:auto;margin:0}
 
 <script>
 'use strict';
-const APP_VERSION = 55; // keep in step with VERSION in sw.js
+const APP_VERSION = 57; // keep in step with VERSION in sw.js
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -293,7 +293,7 @@ function tsOf(date, time){ const [y,m,d] = date.split('-').map(Number), [H,M] = 
 function fmtTime(t){ const [H,M] = t.split(':').map(Number); return is24() ? String(H).padStart(2,'0') + ':' + String(M).padStart(2,'0') : new Date(2000,0,1,H,M).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}); }
 const byTime = (a,b) => (tsOf(a.date, entTime(a)) - tsOf(b.date, entTime(b))) || ((a.created || a.ts) - (b.created || b.ts));
 const validDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s) && s <= todayStr();
-function totals(list){ return list.reduce((t,e) => ({cal:t.cal+num(e.cal), p:t.p+num(e.p), c:t.c+num(e.c), f:t.f+num(e.f)}), {cal:0,p:0,c:0,f:0}); }
+function totals(list){ return list.reduce((t,e) => ({cal:t.cal+num(e.cal), p:t.p+num(e.p), c:t.c+num(e.c), f:t.f+num(e.f), fb:t.fb+num(e.fb)}), {cal:0,p:0,c:0,f:0, fb:0}); }
 
 /* amounts: fractions, units */
 const FRAC = {'¼':'1/4','½':'1/2','¾':'3/4','⅓':'1/3','⅔':'2/3','⅛':'1/8'};
@@ -541,8 +541,10 @@ function flexOn(s){
   const o = f.overrides?.[s]; return o === 'on' ? true : o === 'off' ? false : flexScheduled(s);
 }
 // The targets that apply on a given date (cheat day: no calorie target; refeed day: raised target, extra in carbs).
+// Fiber goal: the saved one, or the dietary guideline of 14 g per 1,000 calories (at least 25 g)
+const fbTarget = () => num(S.fb) || Math.max(25, Math.round(S.cal * 14 / 1000));
 function targetFor(s){
-  const base = {cal:S.cal, p:S.p, c:S.c, f:S.f, kind:''};
+  const base = {cal:S.cal, p:S.p, c:S.c, f:S.f, fb:fbTarget(), kind:''};
   if (!flexOn(s)) return base;
   if (flexCfg().type === 'cheat') return {...base, kind:'cheat'};
   const cal = Math.max(S.cal, num(flexCfg().cal) || Math.round(S.cal * 1.2 / 10) * 10);
@@ -653,9 +655,9 @@ async function calendarHTML(){
 }
 
 /* ---------- Today ---------- */
-function macro(label, v, t, k){
+function macro(label, v, t, k, min){
   const pct = t ? Math.min(100, v/t*100) : 0;
-  return `<div class="mac"><small>${label}</small><b>${r0(v)}<span> / ${t}g</span></b><div class="mbar ${v>t?'over':''}"><i class="k-${k}" style="width:${pct}%"></i></div></div>`;
+  return `<div class="mac"><small>${label}</small><b>${r0(v)}<span>/${t}g</span></b><div class="mbar ${(min ? v < t * 2/3 : v > t) ? 'over' : ''}"><i class="k-${k}" style="width:${pct}%"></i></div></div>`;
 }
 function entryRow(e){
   const st = e.status === 'pending' ? `<span class="tag pend">Queued for ${({photo:'analysis', label:'reading', barcode:'lookup', text:'estimate'})[e.pending?.type] || 'processing'}</span>`
@@ -694,7 +696,7 @@ async function renderToday(){
       : `<div><span class="num"${t.cal && gc ? ` style="color:${gc}"` : ''}>${Math.abs(r0(left)).toLocaleString()}</span><span class="lbl">${left < 0 ? 'calories over' : 'calories left'}</span></div>
          <div class="sub"><b${t.cal && gc ? ` style="color:${gc}"` : ''}>${r0(t.cal).toLocaleString()}</b> eaten of ${T.cal.toLocaleString()}${T.kind === 'refeed' ? ` (raised from ${S.cal.toLocaleString()}, extra in carbs)` : ''}</div>`}
     <div class="segs">${segs}</div>
-    <div class="macros">${macro('Protein',t.p,T.p,'p')}${macro('Carbs',t.c,T.c,'c')}${macro('Fat',t.f,T.f,'f')}</div>
+    <div class="macros">${macro('Protein',t.p,T.p,'p')}${macro('Carbs',t.c,T.c,'c')}${macro('Fat',t.f,T.f,'f')}${macro('Fiber',t.fb,T.fb,'fb',true)}</div>
     ${flexLink}
   </div>`;
   if (S.maxVersion > APP_VERSION) h += `<div class="card bkup" style="border-color:var(--signal)"><b>ChowLog went back to an older version</b>
@@ -803,8 +805,8 @@ async function saveBuilder(log){
   const t = totals(builder.items), rec = builder.recipe, n = rec ? amtOf('b_srv') : 1;
   if (rec && !(n > 0)) return toast('Enter how many servings the recipe makes');
   const f = {id:builder.id || uid(), name:builder.name.trim() || (rec ? 'Recipe' : 'Custom meal'),
-    cal:r1(t.cal/n), p:r1(t.p/n), c:r1(t.c/n), f:r1(t.f/n), // recipes store values per serving
-    items:builder.items.map(i => ({name:i.name, cal:r1(i.cal), p:r1(i.p), c:r1(i.c), f:r1(i.f), thumb:i.thumb})), used:Date.now(),
+    cal:r1(t.cal/n), p:r1(t.p/n), c:r1(t.c/n), f:r1(t.f/n), fb:r1(t.fb/n), // recipes store values per serving
+    items:builder.items.map(i => ({name:i.name, cal:r1(i.cal), p:r1(i.p), c:r1(i.c), f:r1(i.f), fb:r1(i.fb), thumb:i.thumb})), used:Date.now(),
     ...(rec ? {recipe:true, servings:n} : {})};
   await idb.put('favorites', f); builder = null;
   if (log) { refresh(); await useFav(f.id); } else { toast(rec ? 'Recipe saved' : 'Meal saved'); refresh(); }
@@ -812,11 +814,11 @@ async function saveBuilder(log){
 function bItemSheet(k){
   const i = builder.items[k]; if (!i) return;
   sheet(`<h2>Edit item</h2><label>Name<input id="bi_name" value="${esc(i.name)}"></label>
-    <div class="grid4">${numF('bi_cal','Calories',r1(i.cal))}${numF('bi_p','Protein (g)',r1(i.p))}${numF('bi_c','Carbs (g)',r1(i.c))}${numF('bi_f','Fat (g)',r1(i.f))}</div>
+    <div class="grid4">${numF('bi_cal','Calories',r1(i.cal))}${numF('bi_p','Protein (g)',r1(i.p))}${numF('bi_c','Carbs (g)',r1(i.c))}${numF('bi_f','Fat (g)',r1(i.f))}${numF('bi_fb','Fiber (g)',r1(i.fb))}</div>
     ${amtInput('bi_k', 'Multiply by')}${fracChips('bi_k')}
     <div class="btns"><button class="danger" id="bi_del">Remove</button><button class="primary" id="bi_save">Save</button></div>`);
   $('#bi_save').onclick = () => { const v = readMacros('bi_'), m = amtOf('bi_k') || 1;
-    builder.items[k] = {name:v.name || i.name, cal:r1(v.cal*m), p:r1(v.p*m), c:r1(v.c*m), f:r1(v.f*m), thumb:i.thumb}; closeSheet(); renderAdd(); };
+    builder.items[k] = {name:v.name || i.name, cal:r1(v.cal*m), p:r1(v.p*m), c:r1(v.c*m), f:r1(v.f*m), fb:r1(v.fb*m), thumb:i.thumb}; closeSheet(); renderAdd(); };
   $('#bi_del').onclick = () => { builder.items.splice(k, 1); closeSheet(); renderAdd(); };
 }
 async function addToBuilder(o){
@@ -831,11 +833,11 @@ async function addToBuilder(o){
       return toast(transient(err) ? 'No connection. Use a favorite, a recent food, or manual entry.' : err.message);
     }
     await idb.del('entries', e.id);
-    if (e.items?.length > 1) { e.items.forEach(i => builder.items.push({name:i.name, cal:r1(i.cal), p:r1(i.p), c:r1(i.c), f:r1(i.f)})); toast(`Added ${e.items.length} items to ${builder.recipe ? 'recipe' : 'meal'}`); if (curTab === 'add') renderAdd(); return; }
+    if (e.items?.length > 1) { e.items.forEach(i => builder.items.push({name:i.name, cal:r1(i.cal), p:r1(i.p), c:r1(i.c), f:r1(i.f), fb:r1(i.fb)})); toast(`Added ${e.items.length} items to ${builder.recipe ? 'recipe' : 'meal'}`); if (curTab === 'add') renderAdd(); return; }
     o = e;
   }
   const pv = prefThumb(o.name);
-  builder.items.push({name:o.name, cal:r1(o.cal), p:r1(o.p), c:r1(o.c), f:r1(o.f), thumb:pv !== undefined ? (pv || undefined) : o.thumb});
+  builder.items.push({name:o.name, cal:r1(o.cal), p:r1(o.p), c:r1(o.c), f:r1(o.f), fb:r1(o.fb), thumb:pv !== undefined ? (pv || undefined) : o.thumb});
   toast(builder.recipe ? 'Added to recipe' : 'Added to meal'); if (curTab === 'add') renderAdd();
 }
 
@@ -845,17 +847,17 @@ async function addEntry(o){
   const e = {id:uid(), date:logDate || todayStr(), status:'ok', source:'manual', ...o};
   e.time = o.time || logTime || hhmm(new Date()); e.meal = o.meal || mealForTime(e.time); // meal comes from the time eaten
   e.created = Date.now(); e.ts = tsOf(e.date, e.time);
-  for (const k of ['cal','p','c','f']) e[k] = r1(e[k]);
+  for (const k of ['cal','p','c','f','fb']) e[k] = r1(e[k]);
   if (e.status === 'ok') applyPref(e);
   await idb.put('entries', e); refresh(); return e;
 }
 async function useFav(id){
   const f = await idb.get('favorites', id); if (!f) return;
   if (f.recipe) return recipeSheet(f);
-  if (f.items && builder) for (const i of f.items) await addEntry({name:i.name, cal:i.cal, p:i.p, c:i.c, f:i.f, source:'fav', thumb:i.thumb}); // building a meal: keep its parts
-  else if (f.items) await addEntry({name:f.name, cal:f.cal, p:f.p, c:f.c, f:f.f, source:'fav', thumb:f.thumb || f.items.find(i => i.thumb)?.thumb,
-    items:f.items.map(i => ({name:i.name, cal:i.cal, p:i.p, c:i.c, f:i.f}))}); // log a saved meal as one line
-  else await addEntry({name:f.name, cal:f.cal, p:f.p, c:f.c, f:f.f, source:'fav', thumb:f.thumb});
+  if (f.items && builder) for (const i of f.items) await addEntry({name:i.name, cal:i.cal, p:i.p, c:i.c, f:i.f, fb:i.fb, source:'fav', thumb:i.thumb}); // building a meal: keep its parts
+  else if (f.items) await addEntry({name:f.name, cal:f.cal, p:f.p, c:f.c, f:f.f, fb:f.fb, source:'fav', thumb:f.thumb || f.items.find(i => i.thumb)?.thumb,
+    items:f.items.map(i => ({name:i.name, cal:i.cal, p:i.p, c:i.c, f:i.f, fb:i.fb}))}); // log a saved meal as one line
+  else await addEntry({name:f.name, cal:f.cal, p:f.p, c:f.c, f:f.f, fb:f.fb, source:'fav', thumb:f.thumb});
   f.used = Date.now(); await idb.put('favorites', f);
   toast(addedMsg());
 }
@@ -870,24 +872,24 @@ function recipeSheet(f){
   $('#r_go').onclick = async () => {
     const a = amtOf('r_n'); if (!(a > 0)) return toast('Enter an amount like 1.5 or 1 1/2');
     const k = a / n; // share of the whole recipe
-    await addEntry({name:`${f.name} (${amtText(a, 'serving')})`, cal:per.cal*a, p:per.p*a, c:per.c*a, f:per.f*a, source:'recipe', thumb,
-      items:(f.items || []).map(i => ({name:i.name, cal:r1(i.cal*k), p:r1(i.p*k), c:r1(i.c*k), f:r1(i.f*k)}))});
+    await addEntry({name:`${f.name} (${amtText(a, 'serving')})`, cal:per.cal*a, p:per.p*a, c:per.c*a, f:per.f*a, fb:per.fb*a, source:'recipe', thumb,
+      items:(f.items || []).map(i => ({name:i.name, cal:r1(i.cal*k), p:r1(i.p*k), c:r1(i.c*k), f:r1(i.f*k), fb:r1(i.fb*k)}))});
     f.used = Date.now(); await idb.put('favorites', f);
     closeSheet(); toast(addedMsg());
   };
 }
 async function useRecent(i){
   const e = recentCache[i]; if (!e) return;
-  await addEntry({name:e.name, cal:e.cal, p:e.p, c:e.c, f:e.f, source:e.source, thumb:e.thumb, items:e.items});
+  await addEntry({name:e.name, cal:e.cal, p:e.p, c:e.c, f:e.f, fb:e.fb, source:e.source, thumb:e.thumb, items:e.items});
   toast(addedMsg());
 }
 async function delFav(id){ if (!confirm('Delete this favorite?')) return; await idb.del('favorites', id); refresh(); }
-function readMacros(p){ return {name:$('#'+p+'name').value.trim(), cal:num($('#'+p+'cal').value), p:num($('#'+p+'p').value), c:num($('#'+p+'c').value), f:num($('#'+p+'f').value)}; }
+function readMacros(p){ return {name:$('#'+p+'name').value.trim(), cal:num($('#'+p+'cal').value), p:num($('#'+p+'p').value), c:num($('#'+p+'c').value), f:num($('#'+p+'f').value), fb:num($('#'+p+'fb')?.value)}; }
 
 function manualSheet(pre = {}){
   sheet(`<h2>${esc(pre.title || 'Manual entry')}</h2>
     <label>Name<input id="m_name" value="${esc(pre.name || '')}" placeholder="Grilled chicken, 6 oz"></label>
-    <div class="grid4">${numF('m_cal','Calories',pre.cal)}${numF('m_p','Protein (g)',pre.p)}${numF('m_c','Carbs (g)',pre.c)}${numF('m_f','Fat (g)',pre.f)}</div>
+    <div class="grid4">${numF('m_cal','Calories',pre.cal)}${numF('m_p','Protein (g)',pre.p)}${numF('m_c','Carbs (g)',pre.c)}${numF('m_f','Fat (g)',pre.f)}${numF('m_fb','Fiber (g)',pre.fb)}</div>
     ${pre.code ? `<p class="hint">These values are saved for barcode ${esc(pre.code)} as one serving, so the next scan works offline.</p>` : ''}
     <label class="chk"><input type="checkbox" id="m_fav"> Also save as a favorite</label>
     <div class="btns">${pre.code ? '<button id="m_lbl">Scan the nutrition label instead</button>' : '<button class="ghost" data-act="close">Cancel</button>'}<button class="primary" id="m_save">${addLabel()}</button></div>`);
@@ -896,7 +898,7 @@ function manualSheet(pre = {}){
     const v = readMacros('m_');
     if (!v.name) return toast('Add a name first');
     await addEntry({...v, source: pre.code ? 'barcode' : 'manual', thumb:pre.thumb});
-    if (pre.code) await idb.put('products', {code:pre.code, name:v.name, serving:{label:'1 serving', cal:v.cal, p:v.p, c:v.c, f:v.f}, ts:Date.now()});
+    if (pre.code) await idb.put('products', {code:pre.code, name:v.name, serving:{label:'1 serving', cal:v.cal, p:v.p, c:v.c, f:v.f, fb:v.fb}, ts:Date.now()});
     if ($('#m_fav').checked) await idb.put('favorites', {id:uid(), ...v, used:Date.now()});
     closeSheet(); toast(addedMsg());
   };
@@ -972,7 +974,7 @@ async function entrySheet(id){
       ${e.source === 'label' ? `<p class="hint">Read from the nutrition label. One serving is ${esc(e.serving || 'as printed')}.</p>`
         : e.ai && e.ai.source !== 'published' ? `<p class="hint">AI estimate, ${esc(e.ai.confidence || 'unknown')} confidence.${e.ai.notes ? ' ' + esc(e.ai.notes) : ''}</p>` : ''}</div>`;
     h += `<label>Name<input id="e_name" value="${esc(e.name)}"></label>
-      <div class="grid4">${numF('e_cal','Calories',e.cal)}${numF('e_p','Protein (g)',e.p)}${numF('e_c','Carbs (g)',e.c)}${numF('e_f','Fat (g)',e.f)}</div>
+      <div class="grid4">${numF('e_cal','Calories',e.cal)}${numF('e_p','Protein (g)',e.p)}${numF('e_c','Carbs (g)',e.c)}${numF('e_f','Fat (g)',e.f)}${numF('e_fb','Fiber (g)',e.fb)}</div>
       <div class="grid4"><label>Meal<select id="e_meal">${MEALS.map(m => `<option value="${m}" ${m===e.meal?'selected':''}>${MEAL_LABEL[m]}</option>`).join('')}</select></label>
       ${amtInput('e_scale', 'Multiply by')}</div>${fracChips('e_scale')}
       ${whenFields(e)}
@@ -984,7 +986,7 @@ async function entrySheet(id){
       <div class="btns"><button class="danger" id="e_del">Delete</button><button id="e_fav">Favorite</button>${e.date !== todayStr() ? '<button id="e_copy">Log today</button>' : ''}<button class="primary" id="e_save">Save</button></div>`;
     sheet(h);
     $('#e_photo').onclick = () => photoPicker(e);
-    const read = () => { const v = readMacros('e_'), k = amtOf('e_scale') || 1; return {...v, cal:v.cal*k, p:v.p*k, c:v.c*k, f:v.f*k}; };
+    const read = () => { const v = readMacros('e_'), k = amtOf('e_scale') || 1; return {...v, cal:v.cal*k, p:v.p*k, c:v.c*k, f:v.f*k, fb:v.fb*k}; };
     // Changing the time moves the item to the meal for that time; you can still pick a different meal after.
     const syncMeal = () => { const t = readTime('e_time'); if (t) $('#e_meal').value = mealForTime(t); };
     $('#e_time').addEventListener('change', syncMeal); $('#e_time').addEventListener('input', syncMeal);
@@ -993,8 +995,8 @@ async function entrySheet(id){
       const v = read(); if (!v.name) return toast('Add a name first');
       const oldDate = e.date; if (!applyWhen(e)) return;
       const k = amtOf('e_scale') || 1;
-      if (k !== 1 && e.items) e.items = e.items.map(i => ({...i, cal:r1(i.cal*k), p:r1(i.p*k), c:r1(i.c*k), f:r1(i.f*k)}));
-      Object.assign(e, v, {meal:$('#e_meal').value}); for (const k of ['cal','p','c','f']) e[k] = r1(e[k]);
+      if (k !== 1 && e.items) e.items = e.items.map(i => ({...i, cal:r1(i.cal*k), p:r1(i.p*k), c:r1(i.c*k), f:r1(i.f*k), fb:r1(i.fb*k)}));
+      Object.assign(e, v, {meal:$('#e_meal').value}); for (const k of ['cal','p','c','f','fb']) e[k] = r1(e[k]);
       await idb.put('entries', e); closeSheet(); toast(e.date !== oldDate ? `Moved to ${shortD(e.date)}` : 'Saved'); refresh();
     };
     if ($('#e_recalc')) $('#e_recalc').onclick = async () => {
@@ -1006,10 +1008,10 @@ async function entrySheet(id){
       await idb.put('entries', e); closeSheet();
       toast(navigator.onLine ? 'Recalculating…' : 'Queued. It will recalculate when you reconnect.'); refresh(); processQueue();
     };
-    $('#e_fav').onclick = async () => { const v = read(); await idb.put('favorites', {id:uid(), name:v.name || 'Favorite', cal:r1(v.cal), p:r1(v.p), c:r1(v.c), f:r1(v.f), thumb:e.thumb, used:Date.now()}); toast('Saved to favorites'); };
+    $('#e_fav').onclick = async () => { const v = read(); await idb.put('favorites', {id:uid(), name:v.name || 'Favorite', cal:r1(v.cal), p:r1(v.p), c:r1(v.c), f:r1(v.f), fb:r1(v.fb), thumb:e.thumb, used:Date.now()}); toast('Saved to favorites'); };
     if ($('#e_copy')) $('#e_copy').onclick = async () => {
       const v = read();
-      await addEntry({name:v.name, cal:v.cal, p:v.p, c:v.c, f:v.f, source:e.source, thumb:e.thumb, items:e.items, meal:$('#e_meal').value, date:todayStr(), time:hhmm(new Date())});
+      await addEntry({name:v.name, cal:v.cal, p:v.p, c:v.c, f:v.f, fb:v.fb, source:e.source, thumb:e.thumb, items:e.items, meal:$('#e_meal').value, date:todayStr(), time:hhmm(new Date())});
       closeSheet(); toast('Logged today'); refresh();
     };
   }
@@ -1038,8 +1040,8 @@ async function saveMealSheet(m){
     <div class="btns"><button data-act="close">Cancel</button><button class="primary" id="sm_go">Save meal</button></div>`);
   $('#sm_go').onclick = async () => {
     const t = totals(list);
-    await idb.put('favorites', {id:uid(), name:$('#sm_n').value.trim() || 'Saved meal', cal:r1(t.cal), p:r1(t.p), c:r1(t.c), f:r1(t.f),
-      items:list.map(e => ({name:e.name, cal:e.cal, p:e.p, c:e.c, f:e.f})), used:Date.now()});
+    await idb.put('favorites', {id:uid(), name:$('#sm_n').value.trim() || 'Saved meal', cal:r1(t.cal), p:r1(t.p), c:r1(t.c), f:r1(t.f), fb:r1(t.fb),
+      items:list.map(e => ({name:e.name, cal:e.cal, p:e.p, c:e.c, f:e.f, fb:e.fb})), used:Date.now()});
     closeSheet(); toast('Meal saved');
   };
 }
@@ -1113,14 +1115,14 @@ $('#photoInput').onchange = async ev => {
   $('#p_go').onclick = async () => {
     const id = uid(), useTaken = taken && $('#p_when').checked;
     await idb.put('photos', {id, data:full});
-    await addEntry({id, name:'Photo meal', cal:0, p:0, c:0, f:0, source:'ai', thumb, status:'pending', pending:{type:'photo', note:$('#p_note').value.trim()},
+    await addEntry({id, name:'Photo meal', cal:0, p:0, c:0, f:0, fb:0, source:'ai', thumb, status:'pending', pending:{type:'photo', note:$('#p_note').value.trim()},
       ...(useTaken ? {date:taken.date, time:taken.time} : {})});
     if (builder) return; closeSheet(); toast(now ? 'Analyzing…' : 'Queued for analysis'); processQueue();
   };
 };
 
 const SYS = `You estimate nutrition from meal photos for a calorie tracker. Identify each distinct food or drink, estimate its portion, and estimate calories and macronutrients. Use the user's note when given; it overrides what you see. Respond with ONLY a JSON object, no markdown, in this shape:
-{"meal_name":"short name for the whole meal","items":[{"name":"food","portion":"e.g. 1 cup","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0}],"confidence":"low|medium|high","notes":"one short sentence on assumptions"}
+{"meal_name":"short name for the whole meal","items":[{"name":"food","portion":"e.g. 1 cup","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"fiber_g":0}],"confidence":"low|medium|high","notes":"one short sentence on assumptions"}
 If no food is visible, return an empty items array.`;
 
 async function callClaude(content, max = 1500, system, tools){
@@ -1148,10 +1150,10 @@ async function resolvePhoto(e){
 }
 function applyEstimate(e, d, emptyMsg){
   const items = (d.items || []).map(i => ({name:String(i.name || 'Item'), portion:i.portion ? String(i.portion) : '',
-    cal:r1(i.calories), p:r1(i.protein_g), c:r1(i.carbs_g), f:r1(i.fat_g)}));
+    cal:r1(i.calories), p:r1(i.protein_g), c:r1(i.carbs_g), f:r1(i.fat_g), fb:r1(i.fiber_g)}));
   if (!items.length) throw new Error(emptyMsg);
   const t = totals(items);
-  Object.assign(e, {name:String(d.meal_name || items.map(i => i.name).join(', ')).slice(0, 80), cal:r1(t.cal), p:r1(t.p), c:r1(t.c), f:r1(t.f),
+  Object.assign(e, {name:String(d.meal_name || items.map(i => i.name).join(', ')).slice(0, 80), cal:r1(t.cal), p:r1(t.p), c:r1(t.c), f:r1(t.f), fb:r1(t.fb),
     items, ai:{confidence:d.confidence, notes:d.notes, source:d.source}, note:e.pending?.note, desc:e.pending?.desc, status:'ok', pending:null, error:null});
 }
 
@@ -1166,14 +1168,14 @@ function describeSheet(){
   setTimeout(() => $('#d_txt')?.focus(), 50);
   $('#d_go').onclick = async () => {
     const desc = $('#d_txt').value.trim(); if (!desc) return toast('Describe the food first');
-    await addEntry({name:desc.slice(0, 80), cal:0, p:0, c:0, f:0, source:'text', status:'pending', pending:{type:'text', desc}});
+    await addEntry({name:desc.slice(0, 80), cal:0, p:0, c:0, f:0, fb:0, source:'text', status:'pending', pending:{type:'text', desc}});
     if (builder) return; closeSheet(); toast(now ? 'Estimating…' : 'Queued for estimate'); processQueue();
   };
 }
 const TEXT_SYS = `You estimate nutrition for foods described in text, for a calorie tracker. Split the description into its distinct items.
 If an item is a restaurant chain menu item or a packaged brand product, use that company's published nutrition information for the standard item, including default dressings, sauces and toppings unless the user says otherwise. If a web search tool is available, use it to look up the official numbers for chain or brand items. Otherwise estimate typical portions.
 Your final answer must be ONLY a JSON object, no markdown, in this shape:
-{"meal_name":"short name","photo_term":"photo search phrase showing ONE typical serving as eaten, e.g. 'peeled hard boiled egg', 'single banana', 'chicken caesar salad bowl'","items":[{"name":"food","portion":"e.g. full size","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0}],"confidence":"low|medium|high","source":"published|estimate","notes":"one short sentence on assumptions"}`;
+{"meal_name":"short name","photo_term":"photo search phrase showing ONE typical serving as eaten, e.g. 'peeled hard boiled egg', 'single banana', 'chicken caesar salad bowl'","items":[{"name":"food","portion":"e.g. full size","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"fiber_g":0}],"confidence":"low|medium|high","source":"published|estimate","notes":"one short sentence on assumptions"}`;
 async function resolveText(e){
   const content = 'Estimate the nutrition for: ' + e.pending.desc;
   const WEB_LOOKUP = false; // set true to let Claude search the web for official chain/brand nutrition (about 1¢ per lookup)
@@ -1202,7 +1204,7 @@ function labelSheet(full, thumb, code){
   $('#l_go').onclick = async () => {
     const id = uid(), name = $('#l_name').value.trim();
     await idb.put('photos', {id, data:full});
-    await addEntry({id, name:name || 'Nutrition label', cal:0, p:0, c:0, f:0, source:'label', thumb, status:'pending',
+    await addEntry({id, name:name || 'Nutrition label', cal:0, p:0, c:0, f:0, fb:0, source:'label', thumb, status:'pending',
       pending:{type:'label', name, servings:amtOf('l_sv') || 1, code:code || null}});
     if (builder) return; closeSheet(); toast(now ? 'Reading label…' : 'Queued for reading'); processQueue();
   };
@@ -1318,7 +1320,7 @@ function bodyCard(){
 }
 
 const LABEL_SYS = `You read Nutrition Facts panels (or other nutrition information tables) from photos. Report the values for ONE serving exactly as printed; do not estimate or adjust. If the panel shows only per-100 g values, report those and set serving_size to "100 g". If it shows both per-serving and per-container columns, use per-serving. Respond with ONLY a JSON object, no markdown:
-{"product_name":"name if visible on the package, else empty string","serving_size":"as printed, e.g. 2/3 cup (55g)","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"readable":true}
+{"product_name":"name if visible on the package, else empty string","serving_size":"as printed, e.g. 2/3 cup (55g)","calories":0,"protein_g":0,"carbs_g":0,"fat_g":0,"fiber_g":0,"readable":true}
 Set readable to false if the image is not a nutrition panel or the numbers are not legible.`;
 async function resolveLabel(e){
   const ph = await idb.get('photos', e.id);
@@ -1327,12 +1329,12 @@ async function resolveLabel(e){
     {type:'image', source:{type:'base64', media_type:'image/jpeg', data:ph.data.split(',')[1]}},
     {type:'text', text:'Read this nutrition label.'}], 600, LABEL_SYS));
   if (d.readable === false || d.calories == null) throw new Error("The label couldn't be read clearly. Retake it straight-on in good light, or enter it manually.");
-  const s = {label:String(d.serving_size || '1 serving'), cal:num(d.calories), p:num(d.protein_g), c:num(d.carbs_g), f:num(d.fat_g)};
+  const s = {label:String(d.serving_size || '1 serving'), cal:num(d.calories), p:num(d.protein_g), c:num(d.carbs_g), f:num(d.fat_g), fb:num(d.fiber_g)};
   const n = e.pending.servings || 1, code = e.pending.code;
   const name = e.pending.name || String(d.product_name || '').trim() || 'Labeled food';
   if (code) await idb.put('products', normalizeProduct({code, name, serving:s, ts:Date.now()}));
-  await idb.put('favorites', {id:uid(), name:`${name} (${s.label})`, cal:r1(s.cal), p:r1(s.p), c:r1(s.c), f:r1(s.f), used:Date.now()});
-  Object.assign(e, {name:name + (n !== 1 ? ` (${amtText(n, 'serving')})` : ''), cal:r1(s.cal*n), p:r1(s.p*n), c:r1(s.c*n), f:r1(s.f*n),
+  await idb.put('favorites', {id:uid(), name:`${name} (${s.label})`, cal:r1(s.cal), p:r1(s.p), c:r1(s.c), f:r1(s.f), fb:r1(s.fb), used:Date.now()});
+  Object.assign(e, {name:name + (n !== 1 ? ` (${amtText(n, 'serving')})` : ''), cal:r1(s.cal*n), p:r1(s.p*n), c:r1(s.c*n), f:r1(s.f*n), fb:r1(s.fb*n),
     serving:s.label, code:code || undefined, status:'ok', pending:null, error:null});
   await idb.put('entries', e); await idb.del('photos', e.id);
 }
@@ -1345,8 +1347,8 @@ function normalizeOFF(p, code){
   const sq = num(p.serving_quantity) || null;
   const liquid = /ml/i.test(p.serving_quantity_unit || '') || /\d\s*ml\b|fl\.?\s?oz/i.test(p.serving_size || '');
   let serving, size = null;
-  if (n['energy-kcal_serving'] != null) { serving = {label:p.serving_size || '1 serving', cal:num(n['energy-kcal_serving']), p:num(n.proteins_serving), c:num(n.carbohydrates_serving), f:num(n.fat_serving)}; size = sq; }
-  else if (kcal100 != null) { const g = sq || 100; serving = {label:p.serving_size || g + (liquid ? ' ml' : ' g'), cal:num(kcal100)*g/100, p:num(n.proteins_100g)*g/100, c:num(n.carbohydrates_100g)*g/100, f:num(n.fat_100g)*g/100}; size = g; }
+  if (n['energy-kcal_serving'] != null) { serving = {label:p.serving_size || '1 serving', cal:num(n['energy-kcal_serving']), p:num(n.proteins_serving), c:num(n.carbohydrates_serving), f:num(n.fat_serving), fb:num(n.fiber_serving)}; size = sq; }
+  else if (kcal100 != null) { const g = sq || 100; serving = {label:p.serving_size || g + (liquid ? ' ml' : ' g'), cal:num(kcal100)*g/100, p:num(n.proteins_100g)*g/100, c:num(n.carbohydrates_100g)*g/100, f:num(n.fat_100g)*g/100, fb:num(n.fiber_100g)*g/100}; size = g; }
   else return null;
   const brand = (p.brands || '').split(',')[0].trim();
   const pn = String(p.product_name || '').trim();
@@ -1464,7 +1466,7 @@ async function handleBarcode(code){
       <div class="btns"><button id="q_man">Enter manually</button><button id="q_lbl">Scan nutrition label</button><button class="primary" id="q_go">Queue it</button></div>`);
     $('#q_lbl').onclick = () => scanLabelFor(code);
     $('#q_go').onclick = async () => {
-      await addEntry({name:'Barcode ' + code, cal:0, p:0, c:0, f:0, source:'barcode', status:'pending', pending:{type:'barcode', code, servings:amtOf('q_sv') || 1}});
+      await addEntry({name:'Barcode ' + code, cal:0, p:0, c:0, f:0, fb:0, source:'barcode', status:'pending', pending:{type:'barcode', code, servings:amtOf('q_sv') || 1}});
       if (builder) return; closeSheet(); toast('Queued for lookup');
     };
     $('#q_man').onclick = () => manualSheet({code});
@@ -1493,17 +1495,17 @@ function servingSheet(p, source = 'barcode'){
     const k = factor(); if (!(k > 0)) return toast('Enter an amount like 1.5 or 1 1/2');
     const a = amtOf('s_n'), u = $('#s_u').value;
     const thumb = (await Promise.race([thumbP, new Promise(r => setTimeout(() => r(null), 2000))])) || p.thumb || p.image || undefined;
-    await addEntry({name:p.name + (u === 'serving' && a === 1 ? '' : ` (${amtText(a, u)})`), cal:s.cal*k, p:s.p*k, c:s.c*k, f:s.f*k, source, code:p.code, thumb});
+    await addEntry({name:p.name + (u === 'serving' && a === 1 ? '' : ` (${amtText(a, u)})`), cal:s.cal*k, p:s.p*k, c:s.c*k, f:s.f*k, fb:s.fb*k, source, code:p.code, thumb});
     closeSheet(); toast(addedMsg());
   };
-  $('#s_edit').onclick = () => manualSheet({title:'Edit product values', code:p.code, name:p.name, cal:r1(s.cal), p:r1(s.p), c:r1(s.c), f:r1(s.f)});
+  $('#s_edit').onclick = () => manualSheet({title:'Edit product values', code:p.code, name:p.name, cal:r1(s.cal), p:r1(s.p), c:r1(s.c), f:r1(s.f), fb:r1(s.fb)});
 }
 async function resolveBarcode(e){
   const code = e.pending.code, n = e.pending.servings || 1;
   let p = await idb.get('products', code);
   if (!p){ p = await fetchOFF(code); if (!p) throw new Error(`Barcode ${code} isn't in the food database. Tap Enter manually.`); await idb.put('products', p); }
   const s = p.serving, pv = prefThumb(p.name), thumb = pv !== undefined ? pv : await productThumb(p);
-  Object.assign(e, {name:p.name + (n !== 1 ? ` (${amtText(n, 'serving')})` : ''), cal:r1(s.cal*n), p:r1(s.p*n), c:r1(s.c*n), f:r1(s.f*n), code, thumb:pv !== undefined ? (pv || undefined) : (thumb || p.image || e.thumb), status:'ok', pending:null, error:null});
+  Object.assign(e, {name:p.name + (n !== 1 ? ` (${amtText(n, 'serving')})` : ''), cal:r1(s.cal*n), p:r1(s.p*n), c:r1(s.c*n), f:r1(s.f*n), fb:r1(s.fb*n), code, thumb:pv !== undefined ? (pv || undefined) : (thumb || p.image || e.thumb), status:'ok', pending:null, error:null});
   await idb.put('entries', e);
 }
 
@@ -1593,6 +1595,7 @@ async function renderTrends(){
       <div class="stat"><small>Days logged</small><b>${logged.length}<span> of ${trendDays}</span></b></div>
       <div class="stat"><small>Average carbs</small><b>${r0(avg('c'))}${sl(0, S.c + ' g')}${allMeals ? '' : '<span> g</span>'}</b></div>
       <div class="stat"><small>Average fat</small><b>${r0(avg('f'))}${sl(0, S.f + ' g')}${allMeals ? '' : '<span> g</span>'}</b></div>
+      <div class="stat"><small>Average fiber</small><b>${r0(avg('fb'))}${sl(0, fbTarget() + ' g')}${allMeals ? '' : '<span> g</span>'}</b></div>
     </div></div>
   <div class="card"><div class="ctitle"><b>Protein</b><span>avg ${r0(avg('p'))}${allMeals ? ` of ${S.p}` : ''} g</span></div>${barChart(days, allMeals ? S.p : 0, 'p', 'b-p')}</div>
   <div class="card"><div class="ctitle"><b>By meal time</b><span>average per logged day</span></div>
@@ -1652,8 +1655,8 @@ function calcTargets(o){
   const ref = o.goalLb && o.goalLb < o.lb ? o.goalLb : o.lb; // protein from goal weight when losing a lot
   const p = Math.round(ref * (o.pf || PF_DEFAULT[o.goal]));
   const f = Math.round(Math.max(cal * 0.28 / 9, o.lb * 0.3));
-  const c = Math.max(0, Math.round((cal - p*4 - f*9) / 4));
-  return {cal, p, c, f, bmr:Math.round(bmr), scanDate:ls?.date, tdee:Math.round(tdee / 10) * 10, life:Math.round(life / 10) * 10, ex:Math.round(ex / 10) * 10, lbwk, notes};
+  const c = Math.max(0, Math.round((cal - p*4 - f*9) / 4)), fb = Math.max(25, Math.round(cal * 14 / 1000));
+  return {cal, p, c, f, fb, bmr:Math.round(bmr), scanDate:ls?.date, tdee:Math.round(tdee / 10) * 10, life:Math.round(life / 10) * 10, ex:Math.round(ex / 10) * 10, lbwk, notes};
 }
 let ob = null;
 function openSetup(first){
@@ -1711,7 +1714,7 @@ function renderSetup(){
       <details class="why" ${ob.goal === 'gain' || ob.pf > PF_DEFAULT[ob.goal] ? 'open' : ''}><summary>Why not ${metric() ? '3.3 g per kg' : '1.5 g per lb'}?</summary>
         <p>You may have heard ${metric() ? '3.3 g per kg (1.5 g per lb)' : '1.5 g per lb'} for building muscle. It's common gym advice, but the research doesn't support it: a review of 49 studies on people lifting weights (Morton et al., 2018) found muscle gain levels off around ${metric() ? '1.6 g per kg' : '0.7 g per lb'}, with about ${metric() ? '2.2 g per kg' : '1 g per lb'} as a generous upper limit. That's why ChowLog recommends ${metric() ? '2.2 g per kg' : '1 g per lb'}.</p>
         <p>More protein isn't harmful for most healthy people, it just doesn't build more muscle, and it uses calories that could otherwise fuel your training. If you prefer a higher amount, pick it above. If you have kidney disease, follow your doctor's protein advice.</p></details>
-      <div class="grid4">${numF('ob_cal','Calories',r.cal)}${numF('ob_p','Protein (g)',r.p)}${numF('ob_c','Carbs (g)',r.c)}${numF('ob_f','Fat (g)',r.f)}</div>
+      <div class="grid4">${numF('ob_cal','Calories',r.cal)}${numF('ob_p','Protein (g)',r.p)}${numF('ob_c','Carbs (g)',r.c)}${numF('ob_f','Fat (g)',r.f)}${numF('ob_fb','Fiber (g)',r.fb)}</div>
       <p class="hint">You can adjust these now or later in Settings. These are estimates from a standard formula (Mifflin-St Jeor); everyone's body is different, so watch your weight trend for 2–3 weeks and adjust. Check with your doctor or a dietitian before big changes, especially if you have a medical condition or are pregnant or nursing.</p>
       ${nav(true, true, 'Use these targets')}`;
   } else if (s === 6) h = `${dots}<h2>Do you take cheat days?</h2>
@@ -1777,7 +1780,7 @@ async function obNext(){
     await saveSettings();
   }
   if (ob.step === 5) {
-    for (const k of ['cal','p','c','f']) S[k] = r0($('#ob_'+k).value) || S[k];
+    for (const k of ['cal','p','c','f','fb']) S[k] = r0($('#ob_'+k).value) || S[k];
     const {first, step, units, fx, fxMode, fxDow, fxFreq, fxAllow, ...profile} = ob; S.profile = profile; S.setupDone = true; await saveSettings();
     const t = todayStr(); if (!(await idb.get('weights', t))) await idb.put('weights', {date:t, lb:Math.round(ob.lb * 100) / 100});
     if (!ob.first) { ob = null; closeSheet(); toast('Targets saved'); return refresh(); }
@@ -1789,7 +1792,7 @@ async function obNext(){
 function renderSettings(){
   $('#tab-settings').innerHTML = `
   <div class="card"><h2>Daily targets</h2>
-    <div class="grid4">${numF('t_cal','Calories',S.cal)}${numF('t_p','Protein (g)',S.p)}${numF('t_c','Carbs (g)',S.c)}${numF('t_f','Fat (g)',S.f)}</div>
+    <div class="grid4">${numF('t_cal','Calories',S.cal)}${numF('t_p','Protein (g)',S.p)}${numF('t_c','Carbs (g)',S.c)}${numF('t_f','Fat (g)',S.f)}${numF('t_fb','Fiber (g)',fbTarget())}</div>
     <p class="hint" id="t_chk"></p>
     <div class="btns"><button id="t_est">Estimate my targets</button><button class="primary" id="t_save">Save targets</button></div></div>
   <div class="card"><h2>Flex day</h2>
@@ -1893,7 +1896,7 @@ function renderSettings(){
       allow:$('#fx_allow').value, overrides:keepOv ? (old.overrides || {}) : {}};
     await saveSettings(); toast('Flex day saved'); renderSettings();
   };
-  $('#t_save').onclick = async () => { for (const k of ['cal','p','c','f']) S[k] = r0($('#t_'+k).value) || S[k]; await saveSettings(); toast('Targets saved'); };
+  $('#t_save').onclick = async () => { for (const k of ['cal','p','c','f','fb']) S[k] = r0($('#t_'+k).value) || S[k]; await saveSettings(); toast('Targets saved'); };
   $('#ai_save').onclick = async () => { S.apiKey = $('#ai_key').value.trim(); S.model = $('#ai_model').value.trim() || DEFAULTS.model; await saveSettings(); toast('Saved'); processQueue(); };
   $('#ai_test').onclick = async () => {
     S.apiKey = $('#ai_key').value.trim(); S.model = $('#ai_model').value.trim() || DEFAULTS.model;
@@ -2041,7 +2044,7 @@ function longPress(row){
   switch (d.act){
     case 'entry': entrySheet(d.id); break;
     case 'usefav': favSheet(d.id); break;
-    case 'userecent': { const e = recentCache[+d.i]; if (e) manualSheet({title:'Edit, then log', name:e.name, cal:r1(e.cal), p:r1(e.p), c:r1(e.c), f:r1(e.f), thumb:e.thumb}); break; }
+    case 'userecent': { const e = recentCache[+d.i]; if (e) manualSheet({title:'Edit, then log', name:e.name, cal:r1(e.cal), p:r1(e.p), c:r1(e.c), f:r1(e.f), fb:r1(e.fb), thumb:e.thumb}); break; }
     case 'bitem': bItemSheet(+d.i); break;
     case 'pickprod': row.click(); break;
   }
@@ -2051,7 +2054,7 @@ async function favSheet(id){
   if (f.items) { builder = {id:f.id, name:f.name, items:f.items.map(i => ({...i})), recipe:!!f.recipe, servings:f.servings}; showTab('add'); return; } // saved meals open in the meal editor
   sheet(`${f.thumb ? `<img class="pimg" src="${f.thumb}" alt="">` : ''}<h2>Edit favorite</h2>
     <label style="clear:both">Name<input id="fv_name" value="${esc(f.name)}"></label>
-    <div class="grid4">${numF('fv_cal','Calories',r1(f.cal))}${numF('fv_p','Protein (g)',r1(f.p))}${numF('fv_c','Carbs (g)',r1(f.c))}${numF('fv_f','Fat (g)',r1(f.f))}</div>
+    <div class="grid4">${numF('fv_cal','Calories',r1(f.cal))}${numF('fv_p','Protein (g)',r1(f.p))}${numF('fv_c','Carbs (g)',r1(f.c))}${numF('fv_f','Fat (g)',r1(f.f))}${numF('fv_fb','Fiber (g)',r1(f.fb))}</div>
     <div class="btns"><button class="danger" id="fv_del">Delete</button><button id="fv_log">Save and log</button><button class="primary" id="fv_save">Save</button></div>`);
   const save = async () => { const v = readMacros('fv_'); if (!v.name) { toast('Add a name first'); return false; } Object.assign(f, v); await idb.put('favorites', f); return true; };
   $('#fv_save').onclick = async () => { if (await save()) { closeSheet(); toast('Favorite saved'); refresh(); } };

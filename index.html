@@ -253,7 +253,7 @@ button.irow:last-of-type{border-bottom:0}.irow .ied{color:var(--mute);margin-lef
 
 <script>
 'use strict';
-const APP_VERSION = 59; // keep in step with VERSION in sw.js
+const APP_VERSION = 60; // keep in step with VERSION in sw.js
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -467,7 +467,7 @@ function toast(msg, undo){
   t.classList.toggle('act', !!undo); t.classList.add('show'); clearTimeout(toastT);
   const hide = () => t.classList.remove('show', 'act');
   if (undo) $('#t_undo').onclick = async () => { hide(); await undo(); };
-  toastT = setTimeout(hide, undo ? 5000 : 2400);
+  toastT = setTimeout(hide, undo ? 5000 : Math.max(2400, msg.length * 45));
 }
 const numF = (id, label, val) => `<label>${label}<input id="${id}" type="number" inputmode="decimal" step="any" value="${val ?? ''}"></label>`;
 
@@ -1734,7 +1734,7 @@ function renderSetup(){
     <p>Log food by photo, barcode, nutrition label, search or a quick description. It works even with no signal, and your log stays on your phone.</p>
     <p>First, let's set your daily calorie and protein targets. It takes about a minute.</p>
     <div class="btns"><button data-act="obskip">I'll set them myself</button><button class="primary" data-act="obnext">Estimate my targets</button></div>
-    <p class="hint" style="margin-top:16px">Used ChowLog before? <button class="link" data-act="obrestore" style="padding:0">Restore from a backup</button>. Look in your backup folder (such as Documents/ChowLog Backups) or Downloads for chowlog-backup-….json.</p>`;
+    <p class="hint" style="margin-top:16px">Used ChowLog before? <button class="link" data-act="obrestore" style="padding:0">Restore from a backup</button>. Look in your backup folder (such as Documents/ChowLog Backups) or Downloads for chowlog-backup.json.</p>`;
   else if (s === 1) h = `${dots}<h2>About you</h2><p class="hint">Used only to estimate your calorie needs. Stays on this phone.</p>
     <div class="seg">${obChoice('units','imperial','Imperial','lb, ft/in')}${obChoice('units','metric','Metric','kg, cm')}</div>
     <div class="seg">${obChoice('sex','m','Male')}${obChoice('sex','f','Female')}</div>
@@ -1888,10 +1888,10 @@ function renderSettings(){
     <p class="hint">Last backup: <b>${S.lastBackup ? ago(S.lastBackup) : 'never'}</b>. <span id="persist_st"></span></p>
     ${canPickFolder ? `<div class="bkf"><span>Backup folder</span><b>${bkDir ? esc(bkDir.name) : 'Not chosen (using Downloads)'}</b></div>
       <div class="btns" style="margin-top:6px"><button id="bk_dir">${bkDir ? 'Change folder' : 'Choose backup folder'}</button></div>
-      <p class="hint">Pick or create a folder such as <b>Documents/ChowLog Backups</b>. Backups saved there stay safe even if the browser clears ChowLog's data. The 30 newest daily backups are kept, plus <b>chowlog-backup-latest.json</b>.</p>` : ''}
+      <p class="hint">Pick or create a folder such as <b>Documents/ChowLog Backups</b>. Backups saved there stay safe even if the browser clears ChowLog's data. ChowLog keeps a single file, <b>chowlog-backup.json</b>, and replaces it with each new backup.</p>` : ''}
     ${isIOS ? '<p class="hint">Automatic backups aren\'t available on iPhone, so ChowLog reminds you instead. Use “Share backup” to save a copy to Files or iCloud Drive.</p>'
       : `<label class="chk"><input type="checkbox" id="ab_on" ${S.autoBackup ? 'checked' : ''}> Automatic daily backup</label>
-         <p class="hint" style="margin-top:4px">Saves a backup the first time you tap in ChowLog each day, but only if something changed${bkDir ? '' : '. Without a backup folder it goes to Downloads'}.</p>`}
+         <p class="hint" style="margin-top:4px">Saves a backup the first time you tap in ChowLog each day, but only if something changed${bkDir ? '' : '. Without a backup folder it goes to Downloads, where Android can’t replace the old file, so copies add up. Choose a folder to avoid that'}.</p>`}
     <div class="btns"><button id="ex_go">Back up now</button><button id="sh_go">Share backup</button><button id="im_go">Restore backup</button></div>
     <p class="hint">“Share backup” lets you send a copy to Google Drive or email, so it's safe even if you lose the phone.</p></div>
   <div class="card privacy"><h2>Your privacy</h2>
@@ -2007,38 +2007,50 @@ async function chooseBkFolder(){
   } catch (e) { if (e?.name !== 'AbortError') toast("That folder couldn't be used. Try another, such as Documents."); return false; }
 }
 // Must run during a tap (permission prompt). Returns true if the file was written to the folder.
-async function writeToFolder(blob, name){
+// One backup file, overwritten each time, so backups don't pile up.
+const BK_NAME = 'chowlog-backup.json';
+// Returns 'ok', 'kept' (refused to overwrite a much bigger backup), or false (couldn't write to the folder).
+async function writeToFolder(blob, auto){
   if (!bkDir) return false;
   try {
     let perm = await bkDir.queryPermission?.({mode:'readwrite'});
     if (perm !== 'granted') perm = await bkDir.requestPermission?.({mode:'readwrite'});
     if (perm && perm !== 'granted') return false;
-    for (const n of [name, 'chowlog-backup-latest.json']) {
-      const w = await (await bkDir.getFileHandle(n, {create:true})).createWritable(); await w.write(blob); await w.close();
-    }
-    pruneFolder().catch(() => {});
-    return true;
+    // Safety check: if the phone's data was wiped, don't let a nearly empty log overwrite the good backup
+    try {
+      const old = JSON.parse(await (await (await bkDir.getFileHandle(BK_NAME)).getFile()).text());
+      const was = (old.entries || []).length, now = (JSON.parse(await blob.text()).entries || []).length;
+      if (was >= 20 && now < was / 2) {
+        if (auto) return 'kept';
+        if (!confirm(`The backup in "${bkDir.name}" has ${was} food entries, but this phone only has ${now}. Overwrite it anyway?\n\nIf your data went missing, choose Cancel and use Restore backup instead.`)) return 'kept';
+      }
+    } catch {} // no backup there yet
+    const w = await (await bkDir.getFileHandle(BK_NAME, {create:true})).createWritable(); await w.write(blob); await w.close();
+    tidyFolder().catch(() => {});
+    return 'ok';
   } catch { return false; }
 }
-async function pruneFolder(){ // keep the 30 newest daily files
-  const names = []; for await (const [n, hd] of bkDir.entries()) if (hd.kind === 'file' && /^chowlog-backup-\d{4}-\d{2}-\d{2}\.json$/.test(n)) names.push(n);
-  names.sort().reverse(); for (const n of names.slice(30)) await bkDir.removeEntry(n);
+async function tidyFolder(){ // remove the dated daily copies older versions made
+  const old = []; for await (const [n, hd] of bkDir.entries()) if (hd.kind === 'file' && /^chowlog-backup-(\d{4}-\d{2}-\d{2}|latest)\.json$/.test(n)) old.push(n);
+  for (const n of old) await bkDir.removeEntry(n);
 }
-// Saves a backup: to the chosen folder if there is one, otherwise to Downloads. Returns where it went.
-async function storeBackup(blob){
-  const name = `chowlog-backup-${todayStr()}.json`;
-  if (await writeToFolder(blob, name)) return `“${bkDir.name}”`;
-  saveBlob(blob, name); return 'Downloads';
+// Saves a backup: to the chosen folder if there is one, otherwise to Downloads. Returns where it went, or null if it was held back.
+async function storeBackup(blob, auto){
+  const r = await writeToFolder(blob, auto);
+  if (r === 'ok') return `“${bkDir.name}”`;
+  if (r === 'kept') return null;
+  saveBlob(blob, BK_NAME); return 'Downloads';
 }
 async function shareBackup(){
-  const {blob} = await buildBackup(), f = new File([blob], `chowlog-backup-${todayStr()}.json`, {type:'application/json'});
+  const {blob} = await buildBackup(), f = new File([blob], BK_NAME, {type:'application/json'});
   if (navigator.canShare?.({files:[f]})) { try { await navigator.share({files:[f], title:'ChowLog backup'}); } catch {} }
   else { saveBlob(blob, f.name); toast('Saved to Downloads. Upload it to Google Drive from there.'); }
 }
 async function markBackedUp(hash){ Object.assign(S, {lastBackup:Date.now(), backupSnooze:0, lastAutoDay:todayStr(), lastBackupHash:hash}); await saveSettings(); }
 async function exportData(){
-  const {blob, hash} = await buildBackup();
-  toast(`Backup saved to ${await storeBackup(blob)}`);
+  const {blob, hash} = await buildBackup(), where = await storeBackup(blob);
+  if (!where) return toast('Backup not saved. Your existing backup was kept.');
+  toast(`Backup saved to ${where}`);
   await markBackedUp(hash); if (curTab === 'settings') renderSettings(); else refresh();
 }
 /* Daily automatic backup: browsers only allow saving a file right after a tap, so the backup is
@@ -2057,7 +2069,8 @@ async function runAutoBackup(ev){
   // A tap that's choosing the backup folder backs up there itself; wait for the next tap instead
   if (ev?.target?.closest?.('[data-act=fdpick], #bk_dir')) return document.addEventListener('click', runAutoBackup, {capture:true, once:true});
   const b = autoBk; autoBk = null; if (!b || S.lastAutoDay === todayStr()) return;
-  const where = await storeBackup(b.blob);
+  const where = await storeBackup(b.blob, true);
+  if (!where) { S.lastAutoDay = todayStr(); await saveSettings(); return toast('Daily backup skipped: this phone has far fewer entries than your saved backup. If data is missing, use Settings → Restore backup.'); }
   await markBackedUp(b.hash); toast(`Daily backup saved to ${where}`); if (curTab === 'settings') renderSettings();
 }
 $('#importInput').onchange = async ev => {
